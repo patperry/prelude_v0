@@ -42,9 +42,9 @@ letters (`A-Z`, `a-z`), Arabic numerals (`0-9`), and the underscore character
 underscore).
 
 
-### Types
+### Data Types
 
-There are nine *basic* types, which include the following values in addition
+There are nine *basic* data types, which include the following values in addition
 to `null`:
 
   + `Null`: no values besides `null`
@@ -74,6 +74,10 @@ to `null`:
   + `Text`: sequences of Unicode characters
 
   + `Bytes`: sequences of 8-bit bytes
+
+
+In addition to the basic data types there are two families of *composite* data
+types: arrays and records.
 
 
 For any type `T`, the array type `Array<T>` is the set of sequences of `T`

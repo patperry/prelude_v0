@@ -35,7 +35,7 @@ void context_deinit(context *ctx);
 void context_panic(context *ctx, enum error_type error, const char *format, ...)
     __attribute__ ((format (printf, 3, 4)));
 void context_recover(context *ctx);
-int context_status(context *ctx);
+enum error_type context_status(context *ctx);
 const char *context_message(context *ctx);
 
 /* memory */

@@ -59,7 +59,7 @@ void context_recover(context *ctx)
 }
 
 
-int context_status(context *ctx)
+enum error_type context_status(context *ctx)
 {
     return ctx->error;
 }

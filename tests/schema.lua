@@ -1,6 +1,22 @@
 
 tests = {
     {
+        source = '{"x": "2019-03-29"}',
+        schema = '{"x": "Date"}'
+    },
+    {
+        source = '{"x": "19:12:19.230236"}',
+        schema = '{"x": "Time"}'
+    },
+    {
+        source = '{"x": "2019-03-29T19:12:19.230236"}',
+        schema = '{"x": "DateTime"}'
+    },
+    {
+        source = '{"x": "2019-03-29 19:12:19.230236 UTC"}',
+        schema = '{"x": "Timestamp"}'
+    },
+    {
         source = [[
             {"a": 1, "b": 7.2}
         ]],

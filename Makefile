@@ -1,20 +1,36 @@
-
+AR = ar rcu
 CC += -std=c99
-CFLAGS += -Wall -Wextra -pedantic -Werror -g
-CPPFLAGS += -Ilib
 LUA = lua
-LIBS += -lm
+RANLIB = ranlib
 
-schema: src/schema.o lib/context.o
+LIBS += -lm
+CFLAGS += -Wall -Wextra -pedantic -Werror -g
+CPPFLAGS += -Isrc
+LDFLAGS = -g
+
+RESEARCH_A = libreasearch.a
+RESEARCH_O = src/context.o
+
+ALL_O = $(LIB_O) src/main/schema.o
+ALL_T = $(RESEARCH_A) bin/schema
+ALL_A = $(RESEARCH_A)
+
+.PHONY: all
+all: $(ALL_T)
+
+$(RESEARCH_A): $(RESEARCH_O)
+	$(AR) $@ $(RESEARCH_O)
+	$(RANLIB) $@
+
+bin/schema: src/main/schema.o $(RESEARCH_A)
 	$(CC) -o $@ $^ $(LIBS) $(LDFLAGS)
 
-lib/context.o: lib/context.c lib/context.h
-#	$(CC) $(CFLAGS) -o $@ $(CPPCLAGS)
-
+.PHONY: clean
 clean:
-	$(RM) schema lib/context.o src/schema.o
+	$(RM) $(ALL_T) $(ALL_O)
 
-check: schema tests/schema.lua
+.PHONY: check
+check: bin/schema tests/schema.lua
 	$(LUA) tests/schema.lua
 
-.PHONY: clean check
+src/context.o: src/context.c src/context.h

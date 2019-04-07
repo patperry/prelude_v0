@@ -7,11 +7,10 @@
  */
 
 /**
- * Unicode code unit (ASCII, UTF-16, UTF-32)
+ * Unicode code unit (ASCII, UTF-32)
  */
-typedef int_least8_t Char8;
-typedef int_least16_t Char16;
-typedef int_least32_t Char32;
+typedef int8_t Char8;
+typedef int32_t Char32;
 
 #define CHAR32_NONE -1
 #define CHAR32_MAX 0x10FFFF
@@ -95,7 +94,7 @@ typedef enum {
  * writing the output to the specified buffer, and return a pointer past
  * the output. The output will be at most #CHAR_MAP_MAX codepoints.
  */
-Char32 *char_map(Context *ctx, CharMapType type, Char code, Char *output);
+Char32 *char_map(Context *ctx, CharMapType type, Char32 code, Char32 *output);
 
 /**
  * Apply the canonical ordering algorithm to put an array of codepoints
@@ -115,7 +114,7 @@ void chars_compose(Context *ctx, Char32 *codes, int *pcount);
 
 
 typedef struct {
-    unsigned char *bytes;
+    const uint8_t *bytes;
     unsigned int unescape : 1;
     unsigned int size     : 31;
 } Text;
@@ -127,7 +126,7 @@ typedef enum {
 } TextViewType;
 
 Error text_view(Context *ctx, Text *text, TextViewType flags,
-                unsigned char *bytes, int size);
+                const uint8_t *bytes, size_t size);
 
 
 
@@ -135,8 +134,8 @@ Error text_view(Context *ctx, Text *text, TextViewType flags,
  * An iterator over the decoded UTF-32 codepoingt in a text.
  */
 typedef struct {
-	const unsigned char *ptr;
-	const unsigned char *end;
+	const uint8_t *ptr;
+	const uint8_t *end;
 	bool unescape;
 	Char32 current;
 } TextIter;
@@ -152,7 +151,7 @@ typedef struct {
     Text text;
     Char8 ascii_map[CHAR8_MAX + 1];
     Char32 *buffer;
-    int capacity;
+    int32_t capacity;
     CharMapType type;
 } TextMap;
 

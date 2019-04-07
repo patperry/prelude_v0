@@ -42,13 +42,14 @@ void context_deinit(Context *ctx)
 }
 
 
-void context_panic(Context *ctx, Error error, const char *format, ...)
+Error context_panic(Context *ctx, Error error, const char *format, ...)
 {
     va_list args;
     va_start(args, format);
     vsnprintf(ctx->buffer, sizeof(ctx->buffer), format, args);
     va_end(args);
     ctx->error = error;
+    return error;
 }
 
 

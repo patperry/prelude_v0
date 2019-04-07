@@ -6,6 +6,7 @@
 typedef enum {
     ERROR_NONE = 0,
     ERROR_MEMORY,
+    ERROR_OVERFLOW,
     ERROR_VALUE,
 } Error;
 
@@ -34,7 +35,7 @@ void context_init(Context *ctx, AllocFunc alloc, void *alloc_data,
 void context_deinit(Context *ctx);
 
 /* errors */
-void context_panic(Context *ctx, Error error, const char *format, ...)
+Error context_panic(Context *ctx, Error error, const char *format, ...)
     __attribute__ ((format (printf, 3, 4)));
 void context_recover(Context *ctx);
 Error context_error(Context *ctx);

@@ -3,51 +3,53 @@
 
 #define CONTEXT_BUFFER_MAX 1024
 
-enum error_type {
+typedef enum {
     ERROR_NONE = 0,
-    ERROR_NOMEM
-};
+    ERROR_MEMORY,
+    ERROR_VALUE,
+} Error;
 
-enum log_type {
-    LOG_DEBUG = 0,
+typedef enum {
+    LOG_NONE = 0,
+    LOG_DEBUG,
     LOG_INFO
-};
+} Log;
 
-typedef void* (*alloc_func)(void *buf, size_t old_size, size_t new_size,
+typedef void* (*AllocFunc)(void *buf, size_t old_size, size_t new_size,
                             void *data);
 
-typedef void (*log_func)(enum log_type log, const char *message, void *data);
+typedef void (*LogFunc)(Log log, const char *message, void *data);
 
-typedef struct context {
+typedef struct {
     char buffer[CONTEXT_BUFFER_MAX];
-    alloc_func alloc;
-    log_func log;
+    AllocFunc alloc;
+    LogFunc log;
     void *alloc_data;
     void *log_data;
-    enum error_type error;
-} context;
+    Error error;
+} Context;
 
-void context_init(context *ctx, alloc_func alloc, void *alloc_data,
-                  log_func log, void *log_data);
-void context_deinit(context *ctx);
+void context_init(Context *ctx, AllocFunc alloc, void *alloc_data,
+                  LogFunc log, void *log_data);
+void context_deinit(Context *ctx);
 
 /* errors */
-void context_panic(context *ctx, enum error_type error, const char *format, ...)
+void context_panic(Context *ctx, Error error, const char *format, ...)
     __attribute__ ((format (printf, 3, 4)));
-void context_recover(context *ctx);
-enum error_type context_status(context *ctx);
-const char *context_message(context *ctx);
+void context_recover(Context *ctx);
+Error context_error(Context *ctx);
+const char *context_message(Context *ctx);
 
 /* memory */
-void *context_alloc(context *ctx, size_t size);
-void *context_realloc(context *ctx, void *buf, size_t old_size,
+void *context_alloc(Context *ctx, size_t size);
+void *context_realloc(Context *ctx, void *buf, size_t old_size,
                       size_t new_size);
-void context_free(context *ctx, void *buf, size_t size);
+void context_free(Context *ctx, void *buf, size_t size);
 
 /* logging */
-void context_debug(context *ctx, const char *format, ...)
+void context_debug(Context *ctx, const char *format, ...)
     __attribute__ ((format (printf, 2, 3)));
-void context_info(context *ctx, const char *format, ...)
+void context_info(Context *ctx, const char *format, ...)
     __attribute__ ((format (printf, 2, 3)));
 
 #endif /* CONTEXT_H */

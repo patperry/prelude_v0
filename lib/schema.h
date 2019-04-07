@@ -1,22 +1,23 @@
 #ifndef SCHEMA_H
 #define SCHEMA_H
 
+typedef int name_id;
 typedef int datatype_id;
 
-enum datatype_kind {
-    DATATYPE_ANY = -1,
-    DATATYPE_NULL = 0,
-    DATATYPE_BOOLEAN,
-    DATATYPE_INTEGER,
-    DATATYPE_REAL,
-    DATATYPE_DATE,
-    DATATYPE_TIME,
-    DATATYPE_DATETIME,
-    DATATYPE_TIMESTAMP,
-    DATATYPE_TEXT,
-    DATATYPE_BYTES,
-    DATATYPE_ARRAY,
-    DATATYPE_RECORD
+enum data_type {
+    DATA_ANY = -1,
+    DATA_NULL = 0,
+    DATA_BOOLEAN,
+    DATA_INTEGER,
+    DATA_REAL,
+    DATA_DATE,
+    DATA_TIME,
+    DATA_DATETIME,
+    DATA_TIMESTAMP,
+    DATA_TEXT,
+    DATA_BYTES,
+    DATA_ARRAY,
+    DATA_RECORD
 };
 
 struct datatype_array {

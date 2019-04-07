@@ -6,17 +6,17 @@
 #include <time.h>
 #include "context.h"
 
-static void context_log(context *ctx, enum log_type log, const char *format,
+static void context_log(Context *ctx, Log log, const char *format,
                         va_list args);
 
 static void *alloc_default(void *buf, size_t old_size, size_t new_size,
                            void *data);
 
-static void log_default(enum log_type log, const char *message, void *data);
+static void log_default(Log log, const char *message, void *data);
 
 
-void context_init(context *ctx, alloc_func alloc, void *alloc_data,
-                  log_func log, void *log_data)
+void context_init(Context *ctx, AllocFunc alloc, void *alloc_data,
+                  LogFunc log, void *log_data)
 {
     memset(ctx, 0, sizeof(*ctx));
 
@@ -36,14 +36,13 @@ void context_init(context *ctx, alloc_func alloc, void *alloc_data,
 }
 
 
-void context_deinit(struct context *ctx)
+void context_deinit(Context *ctx)
 {
     (void)ctx;
 }
 
 
-void context_panic(context *ctx, enum error_type error,
-                   const char *format, ...)
+void context_panic(Context *ctx, Error error, const char *format, ...)
 {
     va_list args;
     va_start(args, format);
@@ -53,19 +52,19 @@ void context_panic(context *ctx, enum error_type error,
 }
 
 
-void context_recover(context *ctx)
+void context_recover(Context *ctx)
 {
     ctx->error = 0;
 }
 
 
-enum error_type context_status(context *ctx)
+Error context_error(Context *ctx)
 {
     return ctx->error;
 }
 
 
-const char *context_message(context *ctx)
+const char *context_message(Context *ctx)
 {
     if (!ctx->error)
         return NULL;
@@ -73,31 +72,31 @@ const char *context_message(context *ctx)
 }
 
 
-void *context_alloc(context *ctx, size_t size)
+void *context_alloc(Context *ctx, size_t size)
 {
     return context_realloc(ctx, NULL, 0, size);
 }
 
 
-void context_free(context *ctx, void *buf, size_t size)
+void context_free(Context *ctx, void *buf, size_t size)
 {
     context_realloc(ctx, buf, size, 0);
 }
 
 
-void *context_realloc(context *ctx, void *buf, size_t old_size,
+void *context_realloc(Context *ctx, void *buf, size_t old_size,
                       size_t new_size)
 {
     buf = (ctx->alloc)(buf, old_size, new_size, ctx->alloc_data);
     if (!buf && new_size) {
-        context_panic(ctx, ERROR_NOMEM, "failed allocating %zu bytes",
+        context_panic(ctx, ERROR_MEMORY, "failed allocating %zu bytes",
                       new_size);
     }
     return buf;
 }
 
 
-void context_debug(context *ctx, const char *format, ...)
+void context_debug(Context *ctx, const char *format, ...)
 {
     va_list args;
     va_start(args, format);
@@ -106,7 +105,7 @@ void context_debug(context *ctx, const char *format, ...)
 }
 
 
-void context_info(context *ctx, const char *format, ...)
+void context_info(Context *ctx, const char *format, ...)
 {
     va_list args;
     va_start(args, format);
@@ -115,8 +114,7 @@ void context_info(context *ctx, const char *format, ...)
 }
 
 
-void context_log(context *ctx, enum log_type log, const char *format,
-                 va_list args)
+void context_log(Context *ctx, Log log, const char *format, va_list args)
 {
     if (!ctx->error) {
         vsnprintf(ctx->buffer, sizeof(ctx->buffer), format, args);
@@ -145,14 +143,14 @@ void *alloc_default(void *buf, size_t old_size, size_t new_size, void *data)
 }
 
 
-void log_default(enum log_type log, const char *message, void *data)
+void log_default(Log log, const char *message, void *data)
 {
     (void)data;
 
     if (log == LOG_INFO) {
         fprintf(stdout, "%s\n", message);
         fflush(stdout);
-    } else {
+    } else if (log == LOG_DEBUG) {
         time_t clock;
         struct tm tm;
 

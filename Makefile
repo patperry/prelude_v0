@@ -7,13 +7,13 @@ CFLAGS += -Wall -Wextra -pedantic -Werror -g
 CPPFLAGS += -Isrc
 LDFLAGS = -g
 
-RESEARCH_A = libreasearch.a
+RESEARCH_A = src/libreasearch.a
 RESEARCH_O = src/context.o
 
 LUASRC = lib/lua-5.3.5/src
 LUA_CPPFLAGS = -DLUA_USE_READLINE
 LUA_LIBS = -lreadline
-LUA_A = liblua.a
+LUA_A = $(LUASRC)/liblua.a
 LUA_CORE_O = $(LUASRC)/lapi.o $(LUASRC)/lcode.o $(LUASRC)/lctype.o \
 			 $(LUASRC)/ldebug.o $(LUASRC)/ldo.o $(LUASRC)/ldump.o \
 			 $(LUASRC)/lfunc.o $(LUASRC)/lgc.o $(LUASRC)/llex.o \

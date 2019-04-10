@@ -131,6 +131,17 @@ Error text_view(Context *ctx, Text *text, TextViewType flags,
 bool text_eq(Context *ctx, const Text *text1, const Text *text2);
 int32_t text_len(Context *ctx, const Text *text);
 
+typedef struct {
+    uint8_t *bytes;
+    int32_t size;
+    int32_t capacity;
+} TextBuild;
+
+void textbuild_init(Context *ctx, TextBuild *build);
+void textbuild_clear(Context *ctx, TextBuild *build);
+void textbuild_deinit(Context *ctx, TextBuild *build);
+
+void textbuild_char(Context *ctx, TextBuild *build, Char32 code);
 
 /**
  * An iterator over the decoded UTF-32 codepoingt in a text.
@@ -142,11 +153,11 @@ typedef struct {
 	Char32 current;
 } TextIter;
 
-void text_iter_init(Context *ctx, TextIter *it, const Text *text);
-void text_iter_copy(Context *ctx, TextIter *it, const TextIter *src);
-void text_iter_deinit(Context *ctx, TextIter *it);
+void textiter_init(Context *ctx, TextIter *it, const Text *text);
+void textiter_copy(Context *ctx, TextIter *it, const TextIter *src);
+void textiter_deinit(Context *ctx, TextIter *it);
 
-bool text_iter_advance(Context *ctx, TextIter *it);
+bool textiter_advance(Context *ctx, TextIter *it);
 
 
 typedef struct {

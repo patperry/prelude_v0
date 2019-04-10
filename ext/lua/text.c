@@ -5,12 +5,23 @@
 
 static int char_(lua_State *L)
 {
+    Context *ctx = lmodule_open(L);
     int i, n = lua_gettop(L);
+    TextBuild build;
+
+    textbuild_init(ctx, &build);
+
     for (i = 1; i <= n; i++) {
         lua_Integer code = luaL_checkinteger(L, i);
-        (void)code;
+        if (code > CHAR32_MAX || code < 0) {
+            luaL_error(L, "argument %d is outside code point range", i);
+        }
+        textbuild_char(ctx, &build, code);
     }
-    lua_pushstring(L, "xxx");
+
+    lua_pushlstring(L, (const char *)build.bytes, (size_t)build.size);
+    textbuild_deinit(ctx, &build);
+    lmodule_close(L, ctx);
     return 1;
 }
 
@@ -35,10 +46,10 @@ static int codepoint(lua_State *L)
     }
 
     TextIter it;
-    text_iter_init(ctx, &it, text);
+    textiter_init(ctx, &it, text);
 
     while (pos < i) {
-        if (text_iter_advance(ctx, &it)) {
+        if (textiter_advance(ctx, &it)) {
             pos++;
         } else {
             goto out;
@@ -48,14 +59,14 @@ static int codepoint(lua_State *L)
     while (pos <= j) {
         lua_pushinteger(L, (lua_Integer)it.current);
         nret++; // no overflow since text size <= INT32_MAX
-        if (text_iter_advance(ctx, &it)) {
+        if (textiter_advance(ctx, &it)) {
             pos++;
         } else {
             goto out;
         }
     }
 out:
-    text_iter_deinit(ctx, &it);
+    textiter_deinit(ctx, &it);
     lmodule_close(L, ctx);
     return nret;
 }

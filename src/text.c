@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "context.h"
 #include "text.h"
@@ -28,11 +29,11 @@ int32_t text_len(Context *ctx, const Text *text)
     int32_t len = 0;
     TextIter it;
 
-    text_iter_init(ctx, &it, text);
-    while (text_iter_advance(ctx, &it)) {
+    textiter_init(ctx, &it, text);
+    while (textiter_advance(ctx, &it)) {
         len++;
     }
-    text_iter_deinit(ctx, &it);
+    textiter_deinit(ctx, &it);
 
     return len;
 }
@@ -47,7 +48,7 @@ bool text_eq(Context *ctx, const Text *text1, const Text *text2)
 }
 
 
-void text_iter_init(Context *ctx, TextIter *it, const Text *text)
+void textiter_init(Context *ctx, TextIter *it, const Text *text)
 {
     (void)ctx;
     (void)it;
@@ -55,16 +56,45 @@ void text_iter_init(Context *ctx, TextIter *it, const Text *text)
 }
 
 
-void text_iter_deinit(Context *ctx, TextIter *it)
+void textiter_deinit(Context *ctx, TextIter *it)
 {
     (void)ctx;
     (void)it;
 }
 
 
-bool text_iter_advance(Context *ctx, TextIter *it)
+bool textiter_advance(Context *ctx, TextIter *it)
 {
     (void)ctx;
     (void)it;
     return false;
+}
+
+
+void textbuild_init(Context *ctx, TextBuild *build)
+{
+    (void)ctx;
+    memset(build, 0, sizeof(*build));
+}
+
+
+void textbuild_clear(Context *ctx, TextBuild *build)
+{
+    (void)ctx;
+    (void)build;
+}
+
+
+void textbuild_deinit(Context *ctx, TextBuild *build)
+{
+    (void)ctx;
+    (void)build;
+}
+
+
+void textbuild_char(Context *ctx, TextBuild *build, Char32 code)
+{
+    (void)ctx;
+    (void)build;
+    (void)code;
 }

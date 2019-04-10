@@ -1,7 +1,6 @@
-#include "research.h"
 #include "lua.h"
 #include "lauxlib.h"
-#include "lresearch.h"
+#include "module.h"
 
 static int char_(lua_State *L)
 {
@@ -35,7 +34,7 @@ static int decode(lua_State *L)
         break;
     }
 
-    Context *ctx = lresearch_context(L);
+    Context *ctx = lmodule_context(L);
     Text *text = lua_newuserdata(L, sizeof(*text));
     Error error = text_view(ctx, text, flags, (const uint8_t *)input, len);
 
@@ -60,6 +59,17 @@ static int decode(lua_State *L)
 }
 
 
+static int eq(lua_State *L)
+{
+    Context *ctx = lmodule_context(L);
+    const Text *text1 = luaL_checkudata(L, 1, "text");
+    const Text *text2 = luaL_checkudata(L, 2, "text");
+    bool eq = text_eq(ctx, text1, text2);
+    lua_pushboolean(L, (int)eq);
+    return 1;
+}
+
+
 static int tostring(lua_State *L)
 {
     const Text *text = luaL_checkudata(L, 1, "text");
@@ -75,6 +85,7 @@ static const struct luaL_Reg textlib_f[] = {
 };
 
 static const struct luaL_Reg textlib_m[] = {
+    {"__eq", eq},
     {"__tostring", tostring},
     {NULL, NULL}
 };

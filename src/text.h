@@ -128,6 +128,7 @@ typedef enum {
 Error text_view(Context *ctx, Text *text, TextViewType flags,
                 const uint8_t *bytes, size_t size);
 
+bool text_eq(Context *ctx, const Text *text1, const Text *text2);
 
 
 /**

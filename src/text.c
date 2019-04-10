@@ -20,3 +20,12 @@ Error text_view(Context *ctx, Text *text, TextViewType flags,
     text->size = size;
     return ERROR_NONE;
 }
+
+
+bool text_eq(Context *ctx, const Text *text1, const Text *text2)
+{
+    (void)ctx;
+    (void)text1;
+    (void)text2;
+    return false;
+}

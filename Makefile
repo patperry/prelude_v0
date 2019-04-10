@@ -7,8 +7,8 @@ CFLAGS += -Wall -Wextra -pedantic -Werror -g
 CPPFLAGS += -Isrc -Ilib/lua-5.3.5/src
 LDFLAGS = -g
 
-RESEARCH_A = src/libreasearch.a
-RESEARCH_O = src/context.o src/text.o
+LIBRARY_A = src/library.a
+LIBRARY_O = src/context.o src/text.o
 
 LUASRC = lib/lua-5.3.5/src
 LUA_CPPFLAGS = -DLUA_USE_READLINE
@@ -25,32 +25,32 @@ LUA_LIB_O =	$(LUASRC)/lauxlib.o $(LUASRC)/lbaselib.o $(LUASRC)/lbitlib.o \
 			$(LUASRC)/lcorolib.o $(LUASRC)/ldblib.o $(LUASRC)/liolib.o \
 			$(LUASRC)/lmathlib.o $(LUASRC)/loslib.o $(LUASRC)/lstrlib.o \
 			$(LUASRC)/ltablib.o $(LUASRC)/lutf8lib.o $(LUASRC)/loadlib.o
-LUA_EXT_O = ext/lua/linit.o ext/lua/lresearch.o ext/lua/text.o
+LUA_EXT_O = ext/lua/linit.o ext/lua/module.o ext/lua/text.o
 LUA_BASE_O = $(LUA_CORE_O) $(LUA_LIB_O) $(LUA_EXT_O)
 LUA = bin/lua
 
 ALL_O = $(LIB_O) $(LUA_BASE_O) $(LUASRC)/lua.o src/main/schema.o
-ALL_T = $(RESEARCH_A) bin/lua bin/schema
-ALL_A = $(RESEARCH_A) $(LUA_A)
+ALL_T = $(LIBRARY_A) bin/lua bin/schema
+ALL_A = $(LIBRARY_A) $(LUA_A)
 
 .PHONY: all
 all: $(ALL_T)
 
-$(RESEARCH_A): $(RESEARCH_O)
-	$(AR) $@ $(RESEARCH_O)
+$(LIBRARY_A): $(LIBRARY_O)
+	$(AR) $@ $(LIBRARY_O)
 	$(RANLIB) $@
 
 $(LUA_A): $(LUA_BASE_O)
 	$(AR) $@ $(LUA_BASE_O)
 	$(RANLIB) $@
 
-bin/lua: $(LUASRC)/lua.o $(LUA_A) $(RESEARCH_A)
+bin/lua: $(LUASRC)/lua.o $(LUA_A) $(LIBRARY_A)
 	$(CC) -o $@ $(LDFLAGS) $^ $(LIBS) $(LUA_LIBS)
 
 $(LUASRC)/lua.o: $(LUASRC)/lua.c
 	$(CC) -c -o $@ $(CPPFLAGS) $(LUA_CPPFLAGS) $(CFLAGS) $<
 
-bin/schema: src/main/schema.o $(RESEARCH_A)
+bin/schema: src/main/schema.o $(LIBRARY_A)
 	$(CC) -o $@ $(LDFLAGS) $^ $(LIBS)
 
 .PHONY: clean
@@ -64,5 +64,6 @@ check:
 src/context.o: src/context.c src/context.h
 src/text.o: src/text.c src/text.h
 
-ext/lua/lreasearch.o: ext/lua/lresearch.c src/lresearch.h
-ext/lua/text.o: ext/lua/text.c src/research.h
+ext/lua/module.h: src/context.h src/text.h ;
+ext/lua/module.o: ext/lua/module.c ext/lua/module.h
+ext/lua/text.o: ext/lua/text.c ext/lua/module.h

@@ -25,10 +25,20 @@ void lmodule_init(lua_State *L)
 }
 
 
-Context *lmodule_context(lua_State *L)
+Context *lmodule_open(lua_State *L)
 {
     (void)L;
     return &context;
+}
+
+
+void lmodule_close(lua_State *L, Context *ctx)
+{
+    if (context_error(ctx)) {
+        lua_pushstring(L, context_message(ctx));
+        context_recover(ctx);
+        lua_error(L);
+    }
 }
 
 

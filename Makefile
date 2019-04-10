@@ -58,8 +58,8 @@ clean:
 	$(RM) $(ALL_T) $(ALL_O)
 
 .PHONY: check
-check: bin/schema tests/schema.lua
-	$(LUA) tests/schema.lua
+check:
+	$(LUA) tests/all.lua
 
 src/context.o: src/context.c src/context.h
 src/text.o: src/text.c src/text.h

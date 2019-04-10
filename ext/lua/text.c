@@ -3,6 +3,18 @@
 #include "lauxlib.h"
 #include "lresearch.h"
 
+static int char_(lua_State *L)
+{
+    int i, n = lua_gettop(L);
+    for (i = 1; i <= n; i++) {
+        lua_Integer code = luaL_checkinteger(L, i);
+        (void)code;
+    }
+    lua_pushstring(L, "xxx");
+    return 1;
+}
+
+
 static int decode(lua_State *L)
 {
     size_t len;
@@ -23,14 +35,14 @@ static int decode(lua_State *L)
         break;
     }
 
-    lua_settop(L, 1);
-
     Context *ctx = lresearch_context(L);
-    Text text;
-    Error error = text_view(ctx, &text, flags, (const uint8_t *)input, len);
+    Text *text = lua_newuserdata(L, sizeof(*text));
+    Error error = text_view(ctx, text, flags, (const uint8_t *)input, len);
 
     switch (error) {
     case ERROR_NONE:
+        luaL_getmetatable(L, "text");
+        lua_setmetatable(L, -2);
         return 1;
 
     case ERROR_VALUE:
@@ -47,13 +59,31 @@ static int decode(lua_State *L)
     }
 }
 
-static const struct luaL_Reg textlib[] = {
+
+static int tostring(lua_State *L)
+{
+    const Text *text = luaL_checkudata(L, 1, "text");
+    lua_pushlstring(L, (const char *)text->bytes, text->size);
+    return 1;
+}
+
+
+static const struct luaL_Reg textlib_f[] = {
+    {"char", char_},
     {"decode", decode},
     {NULL, NULL}
 };
 
+static const struct luaL_Reg textlib_m[] = {
+    {"__tostring", tostring},
+    {NULL, NULL}
+};
+
+
 int luaopen_text(lua_State *L)
 {
-    luaL_newlib(L, textlib);
+    luaL_newmetatable(L, "text");
+    luaL_setfuncs(L, textlib_m, 0);
+    luaL_newlib(L, textlib_f);
     return 1;
 }

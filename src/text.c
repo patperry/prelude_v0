@@ -5,7 +5,20 @@
 #include <string.h>
 
 #include "context.h"
+#include "buffer.h"
 #include "text.h"
+
+
+Error textbuild_reserve(Context *ctx, TextBuild *build, int32_t extra)
+{
+    void *bytes = build->bytes;
+    Error err = buffer_reserve(ctx, &bytes, sizeof(*build->bytes),
+                               &build->capacity, build->size, extra);
+    if (!err) {
+        build->bytes = bytes;
+    }
+    return err;
+}
 
 
 Error text_view(Context *ctx, Text *text, TextViewType flags,

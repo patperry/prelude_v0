@@ -37,7 +37,7 @@ typedef enum {
 CharWidthType char_width(Context *ctx, Char32 code);
 
 /**
- * Whether a codepoint is a default ignorable character.
+ * Whether a code point is a default ignorable character.
  */
 bool char_isignorable(Context *ctx, Char32 code);
 
@@ -82,7 +82,7 @@ typedef enum {
 } CharMapType;
 
 /**
- * Maximum size (in codepoints) of a single code point's decomposition.
+ * Maximum size (in code points) of a single code point's decomposition.
  *
  * From *TR44* Sec. 5.7.3: "Compatibility mappings are guaranteed to be no
  * longer than 18 characters, although most consist of just a few characters."
@@ -90,22 +90,22 @@ typedef enum {
 #define CHAR_MAP_MAX 18
 
 /**
- * Apply decomposition and/or casefold mapping to a codepoint,
+ * Apply decomposition and/or casefold mapping to a code point,
  * writing the output to the specified buffer, and return a pointer past
- * the output. The output will be at most #CHAR_MAP_MAX codepoints.
+ * the output. The output will be at most #CHAR_MAP_MAX code points.
  */
-Char32 *char_map(Context *ctx, CharMapType type, Char32 code, Char32 *output);
+void char_map(Context *ctx, CharMapType type, Char32 code, Char32 **pbuf);
 
 /**
- * Apply the canonical ordering algorithm to put an array of codepoints
+ * Apply the canonical ordering algorithm to put an array of code points
  * into normal order. See *Unicode* Sec 3.11 and *TR44* Sec. 5.7.4.
  */
 void chars_order(Context *ctx, Char32 *codes, int count);
 
 /**
  * Apply the canonical composition algorithm to put an array of
- * canonically-ordered Unicode codepoints into composed form. This
- * shrinks or preserves the rune count.
+ * canonically-ordered Unicode code points into composed form. This
+ * shrinks or preserves the number of code points.
  */
 void chars_compose(Context *ctx, Char32 *codes, int *pcount);
 
@@ -119,6 +119,7 @@ typedef struct {
     unsigned int size     : 31;
 } Text;
 
+
 typedef enum {
 	TEXT_VIEW_VALIDATE = 0,
 	TEXT_VIEW_TRUST = (1 << 0),
@@ -131,20 +132,9 @@ Error text_view(Context *ctx, Text *text, TextViewType flags,
 bool text_eq(Context *ctx, const Text *text1, const Text *text2);
 int32_t text_len(Context *ctx, const Text *text);
 
-typedef struct {
-    uint8_t *bytes;
-    int32_t size;
-    int32_t capacity;
-} TextBuild;
-
-void textbuild_init(Context *ctx, TextBuild *build);
-void textbuild_clear(Context *ctx, TextBuild *build);
-void textbuild_deinit(Context *ctx, TextBuild *build);
-
-void textbuild_char(Context *ctx, TextBuild *build, Char32 code);
 
 /**
- * An iterator over the decoded UTF-32 codepoingt in a text.
+ * Iterator over the decoded UTF-32 code points in a text.
  */
 typedef struct {
 	const uint8_t *ptr;
@@ -159,6 +149,20 @@ void textiter_deinit(Context *ctx, TextIter *it);
 
 bool textiter_advance(Context *ctx, TextIter *it);
 
+/**
+ * Text building buffer.
+ */
+typedef struct {
+    uint8_t *bytes;
+    int32_t size;
+    int32_t capacity;
+} TextBuild;
+
+void textbuild_init(Context *ctx, TextBuild *build);
+void textbuild_clear(Context *ctx, TextBuild *build);
+void textbuild_deinit(Context *ctx, TextBuild *build);
+
+void textbuild_char(Context *ctx, TextBuild *build, Char32 code);
 
 typedef struct {
     Text text;
@@ -168,5 +172,34 @@ typedef struct {
     CharMapType type;
 } TextMap;
 
+/**
+ * Text encoding.
+ */
+
+/** Number of bytes in the UTF-8 encoding of a code point. */
+#define UTF8_LEN(u) \
+    ((u) <= 0x7F    ? 1 : \
+     (u) <= 0x07FF  ? 2 : \
+     (u) <= 0xFFFF  ? 3 : 4)
+
+/**
+ * Scan over the first code point in a UTF-8 buffer, updating `*pptr` to
+ * point past the encoded code point.
+ *
+ * Returns ERROR_VALUE for invalid UTF-8.
+ */
+Error utf8_scan(Context *ctx, const uint8_t **pptr, const uint8_t *end);
+
+/**
+ * Decode the first code point from a UTF-8 character buffer, without
+ * validating the input.
+ */ 
+Char32 utf8_decode(Context *ctx, const uint8_t *pptr);
+
+/**
+ * Encode a code point into UTF-8. Writes `UTF8_LEN(code)` bytes and
+ * updates `pptr`.
+ */
+void utf8_encode(Context *ctx, Char32 code, uint8_t **pptr);
 
 #endif /* TEXT_H */

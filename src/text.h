@@ -176,8 +176,8 @@ typedef struct {
  * Text encoding.
  */
 
-/** Number of bytes in the UTF-8 encoding of a code point. */
-#define UTF8_LEN(u) \
+/** Number of code units in the UTF-8 encoding of a code point. */
+#define UTF8_COUNT(u) \
     ((u) <= 0x7F    ? 1 : \
      (u) <= 0x07FF  ? 2 : \
      (u) <= 0xFFFF  ? 3 : 4)

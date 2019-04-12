@@ -154,7 +154,7 @@ bool textiter_advance(Context *ctx, TextIter *it);
  */
 typedef struct {
     uint8_t *bytes;
-    int32_t size;
+    int32_t count;
     int32_t capacity;
 } TextBuild;
 

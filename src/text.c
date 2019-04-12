@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -13,7 +14,7 @@ Error textbuild_reserve(Context *ctx, TextBuild *build, int32_t extra)
 {
     void *bytes = build->bytes;
     Error err = buffer_reserve(ctx, &bytes, sizeof(*build->bytes),
-                               &build->capacity, build->size, extra);
+                               &build->capacity, build->count, extra);
     if (!err) {
         build->bytes = bytes;
     }
@@ -94,20 +95,53 @@ void textbuild_init(Context *ctx, TextBuild *build)
 void textbuild_clear(Context *ctx, TextBuild *build)
 {
     (void)ctx;
-    (void)build;
+    build->count = 0;
 }
 
 
 void textbuild_deinit(Context *ctx, TextBuild *build)
 {
-    (void)ctx;
-    (void)build;
+    context_free(ctx, build->bytes, build->count * sizeof(*build->bytes));
 }
 
 
 void textbuild_char(Context *ctx, TextBuild *build, Char32 code)
 {
+    int32_t extra = UTF8_COUNT(code);
+
+    if (textbuild_reserve(ctx, build, extra))
+        return;
+
+    uint8_t *end = build->bytes + build->count;
+    utf8_encode(ctx, code, &end);
+    build->count += extra;
+}
+
+
+// http://www.fileformat.info/info/unicode/utf8.htm
+void utf8_encode(Context *ctx, Char32 code, uint8_t **pptr)
+{
     (void)ctx;
-    (void)build;
-    (void)code;
+    uint8_t *ptr = *pptr;
+
+    assert(code >= 0);
+    uint32_t x = (uint32_t)code;
+
+    if (x <= 0x7F) {
+		*ptr++ = (uint8_t)x;
+	} else if (x <= 0x07FF) {
+		*ptr++ = (uint8_t)(0xC0 | (x >> 6));
+		*ptr++ = (uint8_t)(0x80 | (x & 0x3F));
+	} else if (x <= 0xFFFF) {
+		*ptr++ = (uint8_t)(0xE0 | (x >> 12));
+		*ptr++ = (uint8_t)(0x80 | ((x >> 6) & 0x3F));
+		*ptr++ = (uint8_t)(0x80 | (x & 0x3F));
+	} else {
+		*ptr++ = (uint8_t)(0xF0 | (x >> 18));
+		*ptr++ = (uint8_t)(0x80 | ((x >> 12) & 0x3F));
+		*ptr++ = (uint8_t)(0x80 | ((x >> 6) & 0x3F));
+		*ptr++ = (uint8_t)(0x80 | (x & 0x3F));
+	}
+
+    *pptr = ptr;
 }

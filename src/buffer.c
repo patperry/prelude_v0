@@ -13,6 +13,7 @@
 /* Growth factor for dynamic arrays. Must be greater than 1. */
 #define BUFFER_GROW 1.618 /* Golden Ratio, (1 + sqrt(5)) / 2 */
 
+
 static Error buffer_size(Context *ctx, size_t width, int32_t *pcapacity,
                          int32_t count, int32_t extra);
 

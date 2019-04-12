@@ -4,6 +4,7 @@
 
 static int gc(lua_State *L);
 
+static const char AllocKey = 'k';
 static const char ContextKey = 'k';
 
 static const struct luaL_Reg context_m[] = {
@@ -18,9 +19,27 @@ static const luaL_Reg module_libs[] = {
 };
 
 
+typedef struct {
+    lua_Alloc alloc_func;
+    void *data;
+} Alloc;
+
+
+static void *alloc_func(void *buf, size_t old_size, size_t new_size, void *data)
+{
+    Alloc *alloc = data;
+    return (alloc->alloc_func)(alloc->data, buf, old_size, new_size);
+}
+
+
 void lmodule_init(lua_State *L)
 {
     const luaL_Reg *lib;
+
+    lua_pushlightuserdata(L, (void *)&AllocKey);
+    Alloc *alloc = lua_newuserdata(L, sizeof(*alloc));
+    alloc->alloc_func = lua_getallocf(L, &alloc->data);
+    lua_settable(L, LUA_REGISTRYINDEX);
 
     luaL_newmetatable(L, "context");
     luaL_setfuncs(L, context_m, 0);
@@ -28,7 +47,7 @@ void lmodule_init(lua_State *L)
     lua_pushlightuserdata(L, (void *)&ContextKey);
 
     Context *ctx = lua_newuserdata(L, sizeof(*ctx));
-    context_init(ctx, NULL, NULL, NULL, NULL);
+    context_init(ctx, alloc_func, alloc, NULL, NULL);
 
     lua_pushvalue(L, -3);
     lua_setmetatable(L, -2);

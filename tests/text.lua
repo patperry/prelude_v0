@@ -3,6 +3,9 @@ function valid(x, mode)
     return text.decode(x, mode)
 end
 
+x = text.decode("x")
+assert(x == x)
+assert(text.decode("x") == text.decode("x"))
 assert(text.decode("hello") == text.char(0x68, 0x65, 0x6c, 0x6c, 0x6f))
 
 -- valid text

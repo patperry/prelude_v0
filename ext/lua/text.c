@@ -19,7 +19,7 @@ static int char_(lua_State *L)
         textbuild_char(ctx, &build, code);
     }
 
-    lua_pushlstring(L, (const char *)build.bytes, (size_t)build.size);
+    lua_pushlstring(L, (const char *)build.bytes, (size_t)build.count);
     textbuild_deinit(ctx, &build);
     lmodule_close(L, ctx);
     return 1;

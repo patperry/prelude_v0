@@ -56,8 +56,17 @@ int32_t text_len(Context *ctx, const Text *text)
 bool text_eq(Context *ctx, const Text *text1, const Text *text2)
 {
     (void)ctx;
-    (void)text1;
-    (void)text2;
+    if (text1 == text2) {
+        return true;
+    } else if (text1->bytes == text2->bytes
+            && text1->unescape == text2->unescape
+            && text1->size == text2->size) {
+        return true;
+    } else if (text1->size == text2->size
+            && !text1->unescape && !text2->unescape) {
+        return memcmp(text1->bytes, text2->bytes,
+                      text1->size * sizeof(*text1->bytes)) == 0;
+    }
     return false;
 }
 

@@ -102,10 +102,23 @@ typedef int32_t Char32;
 #define CHAR32_MAX 0x10FFFF
 
 /** Number of code units in the UTF-8 encoding of a code point. */
-#define UTF8_COUNT(u) \
+#define CHAR32_UTF8_COUNT(u) \
     ((u) <= 0x7F    ? 1 : \
      (u) <= 0x07FF  ? 2 : \
      (u) <= 0xFFFF  ? 3 : 4)
+
+
+/** Indicates whether a 16-bit code unit is a UTF-16 high surrogate.
+ *  High surrogates are in the range 0xD800 `(1101 1000 0000 0000)`
+ *  to 0xDBFF `(1101 1011 1111 1111)`. */
+#define CHAR32_ISHIGH(x) (((x) & 0xFC00) == 0xD800)
+
+/** Indicates whether a 16-bit code unit is a UTF-16 low surrogate.
+ *  Low surrogates are in the range 0xDC00 `(1101 1100 0000 0000)`
+ *  to 0xDFFF `(1101 1111 1111 1111)`. */
+#define CHAR32_ISLOW(x) (((x) & 0xFC00) == 0xDC00)
+
+
 
 /**
  * Scan over the first code point in a UTF-8 buffer, updating `*pptr` to
@@ -114,6 +127,13 @@ typedef int32_t Char32;
  * Returns ERROR_VALUE for invalid UTF-8.
  */
 Error char_scan(Context *ctx, const uint8_t **pptr, const uint8_t *end);
+
+/**
+ * Scan a JSON-style backslash (\\) escape.
+ *
+ * Returns ERROR_VALUE for invalid UTF-8 or invalid escape code.
+ */
+Error char_scan_escape(Context *ctx, const uint8_t **pptr, const uint8_t *end);
 
 /**
  * Decode the first code point from a UTF-8 character buffer, without
@@ -227,9 +247,8 @@ typedef struct {
 } Text;
 
 typedef enum {
-	TEXTVIEW_VALIDATE = 0,
-	TEXTVIEW_TRUST = (1 << 0),
-	TEXTVIEW_UNESCAPE = (1 << 1)
+	TEXTVIEW_UTF8 = 0,
+	TEXTVIEW_UNESCAPE = (1 << 0)
 } TextViewType;
 
 Error text_view(Context *ctx, Text *text, TextViewType flags,

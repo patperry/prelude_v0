@@ -1,6 +1,10 @@
 #include <assert.h>
+#include <ctype.h>
 
 #include "prelude.h"
+
+/* http://stackoverflow.com/a/11986885 */
+#define hextoi(ch) ((ch > '9') ? (ch &~ 0x20) - 'A' + 10 : (ch - '0'))
 
 /*
   Source:
@@ -186,6 +190,140 @@ out:
     *pptr = ptr;
     return err;
 }
+
+
+static Error char_scan_uescape(Context *ctx, const uint8_t **pptr,
+                               const uint8_t *end)
+{
+    const uint8_t *input = *pptr;
+	const uint8_t *ptr = input;
+	int32_t code, low;
+	uint_fast8_t ch;
+	unsigned i;
+	int err;
+
+	if (ptr + 4 > end) {
+		goto error_inval_incomplete;
+	}
+
+	code = 0;
+	for (i = 0; i < 4; i++) {
+		ch = *ptr++;
+		if (!isxdigit(ch)) {
+			goto error_inval_hex;
+		}
+		code = (code << 4) + hextoi(ch);
+	}
+
+	if (CHAR32_ISHIGH(code)) {
+		if (ptr + 6 > end || ptr[0] != '\\' || ptr[1] != 'u') {
+			goto error_inval_nolow;
+		}
+		ptr += 2;
+		input = ptr;
+
+		low = 0;
+		for (i = 0; i < 4; i++) {
+			ch = *ptr++;
+			if (!isxdigit(ch)) {
+				goto error_inval_hex;
+			}
+			low = (low << 4) + hextoi(ch);
+		}
+		if (!CHAR32_ISLOW(low)) {
+			ptr -= 6;
+			goto error_inval_low;
+		}
+	} else if (CHAR32_ISLOW(code)) {
+		goto error_inval_nohigh;
+	}
+
+	err = ERROR_NONE;
+	goto out;
+
+error_inval_incomplete:
+	err = context_panic(ctx, ERROR_VALUE, "incomplete escape code (\\u%.*s)",
+			            (int)(end - input), input);
+	goto out;
+
+error_inval_hex:
+	err = context_panic(ctx, ERROR_VALUE,
+                        "invalid hex value in escape code (\\u%.*s)", 4, input);
+	goto out;
+
+error_inval_nolow:
+	err = context_panic(ctx, ERROR_VALUE, "missing UTF-16 low surrogate"
+			            " after high surrogate escape code (\\u%.*s)",
+                        4, input);
+	goto out;
+
+error_inval_low:
+	err = context_panic(ctx, ERROR_VALUE,
+                        "invalid UTF-16 low surrogate (\\u%.*s)"
+			            " after high surrogate escape code (\\u%.*s)",
+                        4, input, 4, input - 6);
+	goto out;
+
+error_inval_nohigh:
+	err = context_panic(ctx, ERROR_VALUE, "missing UTF-16 high surrogate"
+			            " before low surrogate escape code (\\u%.*s)",
+			            4, input);
+	goto out;
+
+out:
+	*pptr = ptr;
+	return err;
+}
+
+
+Error char_scan_escape(Context *ctx, const uint8_t **pptr, const uint8_t *end)
+{
+    const uint8_t *ptr = *pptr;
+    uint_fast8_t ch;
+    Error err;
+
+    if (ptr == end) {
+        goto error_incomplete;
+    }
+
+    ch = *ptr++;
+
+    switch (ch) {
+    case '"':
+    case '\\':
+    case '/':
+    case 'b':
+    case 'f':
+    case 'n':
+    case 'r':
+    case 't':
+        break;
+    case 'u':
+        if ((err = char_scan_uescape(ctx, &ptr, end))) {
+            goto out;
+        }
+        break;
+    default:
+        goto error_inval;
+    }
+
+    err = 0;
+    goto out;
+
+error_incomplete:
+    err = context_panic(ctx, ERROR_VALUE, "incomplete escape code (\\)");
+    goto out;
+
+error_inval:
+    err = context_panic(ctx, ERROR_VALUE, "invalid escape code (\\%c)", ch);
+    goto out;
+
+out:
+    *pptr = ptr;
+    return err;
+}
+
+
 
 
 // http://www.fileformat.info/info/unicode/utf8.htm

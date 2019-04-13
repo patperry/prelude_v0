@@ -117,13 +117,13 @@ static int view(lua_State *L, TextViewType flags)
 
 static int decode(lua_State *L)
 {
-    return view(L, TEXTVIEW_VALIDATE);
+    return view(L, TEXTVIEW_UTF8);
 }
 
 
 static int unescape(lua_State *L)
 {
-    return view(L, TEXTVIEW_VALIDATE | TEXTVIEW_UNESCAPE);
+    return view(L, TEXTVIEW_UTF8 | TEXTVIEW_UNESCAPE);
 }
 
 

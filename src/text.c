@@ -49,12 +49,28 @@ Error text_view(Context *ctx, Text *text, TextViewType flags,
     Error err = ERROR_NONE;
     const uint8_t *ptr = bytes;
     const uint8_t *end = ptr + size;
+    bool unescape = false;
+    uint8_t ch;
 
     if (flags & TEXTVIEW_UNESCAPE) {
-        // TODO
+        while (ptr != end) {
+            ch = *ptr++;
+            if (ch == '\\') {
+                unescape = true;
+
+                if ((err = char_scan_escape(ctx, &ptr, end))) {
+                    goto out;
+                }
+            } else if (ch & 0x80) {
+                ptr--;
+                if ((err = char_scan(ctx, &ptr, end))) {
+                    goto out;
+                }
+            }
+        }
     } else {
         while (ptr != end) {
-            uint8_t ch = *ptr++;
+            ch = *ptr++;
             if (ch & 0x80) {
                 ptr--;
                 if ((err = char_scan(ctx, &ptr, end))) {
@@ -67,7 +83,7 @@ Error text_view(Context *ctx, Text *text, TextViewType flags,
 out:
     if (!err) {
         text->bytes = bytes;
-        text->unescape = (flags & TEXTVIEW_UNESCAPE) ? 1 : 0;
+        text->unescape = (unsigned int)unescape;
         text->size = size;
     }
     return err;
@@ -163,7 +179,7 @@ Text textbuild_get(Context *ctx, TextBuild *build)
 
 void textbuild_char(Context *ctx, TextBuild *build, Char32 code)
 {
-    int32_t extra = UTF8_COUNT(code);
+    int32_t extra = CHAR32_UTF8_COUNT(code);
 
     if (textbuild_reserve(ctx, build, extra))
         return;

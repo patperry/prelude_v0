@@ -29,12 +29,12 @@ typedef enum {
     LOG_NONE = 0,
     LOG_DEBUG,
     LOG_INFO
-} Log;
+} LogType;
 
 typedef void* (*AllocFunc)(void *buf, size_t old_size, size_t new_size,
                             void *data);
 
-typedef void (*LogFunc)(Log log, const char *message, void *data);
+typedef void (*LogFunc)(LogType log, const char *message, void *data);
 
 typedef struct {
     char buffer[CONTEXT_BUFFER_MAX];

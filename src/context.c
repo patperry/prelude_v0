@@ -5,13 +5,13 @@
 #include <time.h>
 #include "prelude.h"
 
-static void context_log(Context *ctx, Log log, const char *format,
+static void context_log(Context *ctx, LogType log, const char *format,
                         va_list args);
 
 static void *alloc_default(void *buf, size_t old_size, size_t new_size,
                            void *data);
 
-static void log_default(Log log, const char *message, void *data);
+static void log_default(LogType log, const char *message, void *data);
 
 
 void context_init(Context *ctx, AllocFunc alloc, void *alloc_data,
@@ -114,7 +114,7 @@ void context_info(Context *ctx, const char *format, ...)
 }
 
 
-void context_log(Context *ctx, Log log, const char *format, va_list args)
+void context_log(Context *ctx, LogType log, const char *format, va_list args)
 {
     if (!ctx->error) {
         vsnprintf(ctx->buffer, sizeof(ctx->buffer), format, args);
@@ -143,7 +143,7 @@ void *alloc_default(void *buf, size_t old_size, size_t new_size, void *data)
 }
 
 
-void log_default(Log log, const char *message, void *data)
+void log_default(LogType log, const char *message, void *data)
 {
     (void)data;
 

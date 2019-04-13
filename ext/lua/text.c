@@ -83,26 +83,10 @@ out:
 }
 
 
-static int decode(lua_State *L)
+static int view(lua_State *L, TextViewType flags)
 {
     size_t len;
     const char *input = luaL_checklstring(L, 1, &len);
-    const char *mode = luaL_optstring(L, 2, "n");
-    TextViewType flags = TEXT_VIEW_VALIDATE;
-
-    switch (mode[0]) {
-    case 'n':
-        break;
-
-    case 'u':
-        flags |= TEXT_VIEW_UNESCAPE;
-        break;
-
-    default:
-        luaL_argcheck(L, 0, 2, "invalid format");
-        break;
-    }
-
     Context *ctx = lmodule_open(L);
     Text text;
     Error error = text_view(ctx, &text, flags, (const uint8_t *)input, len);
@@ -128,6 +112,18 @@ static int decode(lua_State *L)
 
     lmodule_close(L, ctx);
     return nret;
+}
+
+
+static int decode(lua_State *L)
+{
+    return view(L, TEXTVIEW_VALIDATE);
+}
+
+
+static int unescape(lua_State *L)
+{
+    return view(L, TEXTVIEW_VALIDATE | TEXTVIEW_UNESCAPE);
 }
 
 
@@ -172,11 +168,11 @@ static int gc(lua_State *L)
 }
 
 
-
 static const struct luaL_Reg textlib_f[] = {
     {"char", char_},
     {"codepoint", codepoint},
     {"decode", decode},
+    {"unescape", unescape},
     {NULL, NULL}
 };
 

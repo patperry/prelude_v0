@@ -129,9 +129,9 @@ void textobj_deinit(Context *ctx, TextObj *obj);
 
 
 typedef enum {
-	TEXT_VIEW_VALIDATE = 0,
-	TEXT_VIEW_TRUST = (1 << 0),
-	TEXT_VIEW_UNESCAPE = (1 << 1)
+	TEXTVIEW_VALIDATE = 0,
+	TEXTVIEW_TRUST = (1 << 0),
+	TEXTVIEW_UNESCAPE = (1 << 1)
 } TextViewType;
 
 Error text_view(Context *ctx, Text *text, TextViewType flags,

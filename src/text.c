@@ -51,7 +51,7 @@ Error text_view(Context *ctx, Text *text, TextViewType flags,
     }
 
     text->bytes = bytes;
-    text->unescape = (flags & TEXT_VIEW_UNESCAPE) ? 1 : 0;
+    text->unescape = (flags & TEXTVIEW_UNESCAPE) ? 1 : 0;
     text->size = size;
     return ERROR_NONE;
 }

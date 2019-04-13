@@ -1,7 +1,4 @@
 
-function valid(x, mode)
-    return text.decode(x, mode)
-end
 
 x = text.decode("x")
 assert(x == x)
@@ -9,11 +6,11 @@ assert(text.decode("x") == text.decode("x"))
 assert(text.decode("hello") == text.char(0x68, 0x65, 0x6c, 0x6c, 0x6f))
 
 -- valid text
-assert(valid("hello world"))
-assert(valid("escape: \\n\\r\\t", "u"))
-assert(valid("unicode escape: \\u0034", "u"))
-assert(valid("surrogate pair: \\uD834\\uDD1E", "u"))
-assert(valid("B\\u0153uf Bourguignon", "u"))
+assert(text.decode("hello world"))
+assert(text.unescape("escape: \\n\\r\\t"))
+assert(text.unescape("unicode escape: \\u0034"))
+assert(text.unescape("surrogate pair: \\uD834\\uDD1E"))
+assert(text.unescape("B\\u0153uf Bourguignon"))
 
 -- invalid text
-assert(not valid("invalid utf-8 \xBF"))
+assert(not text.decode("invalid utf-8 \xBF"))

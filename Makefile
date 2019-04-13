@@ -8,7 +8,7 @@ CPPFLAGS += -Isrc -Ilib/lua-5.3.5/src
 LDFLAGS = -g
 
 LIBRARY_A = src/library.a
-LIBRARY_O = src/buffer.o src/context.o src/text.o
+LIBRARY_O = src/buffer.o src/char.o src/context.o src/text.o
 
 LUASRC = lib/lua-5.3.5/src
 LUA_CPPFLAGS = -DLUA_USE_READLINE
@@ -62,6 +62,7 @@ check:
 	$(LUA) tests/all.lua
 
 src/buffer.o: src/buffer.c src/buffer.h src/context.h
+src/char.o: src/char.c src/context.h src/text.h
 src/context.o: src/context.c src/context.h
 src/text.o: src/text.c src/buffer.h src/text.h
 

@@ -197,18 +197,18 @@ typedef struct {
  *
  * Returns ERROR_VALUE for invalid UTF-8.
  */
-Error utf8_scan(Context *ctx, const uint8_t **pptr, const uint8_t *end);
+Error char_scan(Context *ctx, const uint8_t **pptr, const uint8_t *end);
 
 /**
  * Decode the first code point from a UTF-8 character buffer, without
  * validating the input.
  */ 
-Char32 utf8_decode(Context *ctx, const uint8_t *pptr);
+Char32 char_decode(Context *ctx, const uint8_t *pptr);
 
 /**
  * Encode a code point into UTF-8. Writes `UTF8_LEN(code)` bytes and
  * updates `pptr`.
  */
-void utf8_encode(Context *ctx, Char32 code, uint8_t **pptr);
+void char_encode(Context *ctx, Char32 code, uint8_t **pptr);
 
 #endif /* TEXT_H */

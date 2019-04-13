@@ -1,4 +1,3 @@
-#include <assert.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -44,16 +43,39 @@ Error textbuild_reserve(Context *ctx, TextBuild *build, int32_t extra)
 Error text_view(Context *ctx, Text *text, TextViewType flags,
                 const uint8_t *bytes, size_t size)
 {
+    memset(text, 0, sizeof(*text));
+
     if (size > (size_t)INT32_MAX) {
         return context_panic(ctx, ERROR_OVERFLOW, "text size (%zu bytes)"
                              " exceeds maximum (%"PRId32" bytes)",
                              size, INT32_MAX);
     }
 
-    text->bytes = bytes;
-    text->unescape = (flags & TEXTVIEW_UNESCAPE) ? 1 : 0;
-    text->size = size;
-    return ERROR_NONE;
+    Error err = ERROR_NONE;
+    const uint8_t *ptr = bytes;
+    const uint8_t *end = ptr + size;
+
+    if (flags & TEXTVIEW_UNESCAPE) {
+        // TODO
+    } else {
+        while (ptr != end) {
+            uint8_t ch = *ptr++;
+            if (ch & 0x80) {
+                ptr--;
+                if ((err = char_scan(ctx, &ptr, end))) {
+                    goto out;
+                }
+            }
+        }
+    }
+
+out:
+    if (!err) {
+        text->bytes = bytes;
+        text->unescape = (flags & TEXTVIEW_UNESCAPE) ? 1 : 0;
+        text->size = size;
+    }
+    return err;
 }
 
 
@@ -152,35 +174,6 @@ void textbuild_char(Context *ctx, TextBuild *build, Char32 code)
         return;
 
     uint8_t *end = build->bytes + build->count;
-    utf8_encode(ctx, code, &end);
+    char_encode(ctx, code, &end);
     build->count += extra;
-}
-
-
-// http://www.fileformat.info/info/unicode/utf8.htm
-void utf8_encode(Context *ctx, Char32 code, uint8_t **pptr)
-{
-    (void)ctx;
-    uint8_t *ptr = *pptr;
-
-    assert(code >= 0);
-    uint32_t x = (uint32_t)code;
-
-    if (x <= 0x7F) {
-		*ptr++ = (uint8_t)x;
-	} else if (x <= 0x07FF) {
-		*ptr++ = (uint8_t)(0xC0 | (x >> 6));
-		*ptr++ = (uint8_t)(0x80 | (x & 0x3F));
-	} else if (x <= 0xFFFF) {
-		*ptr++ = (uint8_t)(0xE0 | (x >> 12));
-		*ptr++ = (uint8_t)(0x80 | ((x >> 6) & 0x3F));
-		*ptr++ = (uint8_t)(0x80 | (x & 0x3F));
-	} else {
-		*ptr++ = (uint8_t)(0xF0 | (x >> 18));
-		*ptr++ = (uint8_t)(0x80 | ((x >> 12) & 0x3F));
-		*ptr++ = (uint8_t)(0x80 | ((x >> 6) & 0x3F));
-		*ptr++ = (uint8_t)(0x80 | (x & 0x3F));
-	}
-
-    *pptr = ptr;
 }

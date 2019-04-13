@@ -3,6 +3,17 @@
 #include "module.h"
 
 
+void pushtext(lua_State *L, const Text *text)
+{
+    Context *ctx = lmodule_open(L);
+    TextObj *obj = lua_newuserdata(L, sizeof(*obj));
+    luaL_getmetatable(L, "text");
+    lua_setmetatable(L, -2);
+    textobj_init(ctx, obj, text);
+    lmodule_close(L, ctx);
+}
+
+
 static int char_(lua_State *L)
 {
     Context *ctx = lmodule_open(L);
@@ -18,8 +29,8 @@ static int char_(lua_State *L)
         }
         textbuild_char(ctx, &build, code);
     }
-
-    lua_pushlstring(L, (const char *)build.bytes, (size_t)build.count);
+    Text text = textbuild_get(ctx, &build);
+    pushtext(L, &text);
     textbuild_deinit(ctx, &build);
     lmodule_close(L, ctx);
     return 1;
@@ -93,16 +104,13 @@ static int decode(lua_State *L)
     }
 
     Context *ctx = lmodule_open(L);
-    TextObj *obj = lua_newuserdata(L, sizeof(*obj));
     Text text;
     Error error = text_view(ctx, &text, flags, (const uint8_t *)input, len);
     int nret;
 
     switch (error) {
     case ERROR_NONE:
-        luaL_getmetatable(L, "text");
-        lua_setmetatable(L, -2);
-        textobj_init(ctx, obj, &text);
+        pushtext(L, &text);
         nret = 1;
         break;
 

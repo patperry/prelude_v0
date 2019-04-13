@@ -133,6 +133,17 @@ void textbuild_deinit(Context *ctx, TextBuild *build)
 }
 
 
+Text textbuild_get(Context *ctx, TextBuild *build)
+{
+    (void)ctx;
+    Text text;
+    text.bytes = build->bytes;
+    text.unescape = 0;
+    text.size = (unsigned int)build->count;
+    return text;
+}
+
+
 void textbuild_char(Context *ctx, TextBuild *build, Char32 code)
 {
     int32_t extra = UTF8_COUNT(code);

@@ -1,10 +1,7 @@
 #include <assert.h>
 #include <inttypes.h>
-#include <stddef.h>
-#include <stdint.h>
 
-#include "context.h"
-#include "buffer.h"
+#include "prelude.h"
 
 
 /* Default initial size for nonempty dynamic arrays. Must be positive. */

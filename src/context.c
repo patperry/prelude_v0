@@ -1,10 +1,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stddef.h>
 #include <string.h>
 #include <time.h>
-#include "context.h"
+#include "prelude.h"
 
 static void context_log(Context *ctx, Log log, const char *format,
                         va_list args);

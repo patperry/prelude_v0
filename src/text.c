@@ -1,12 +1,7 @@
 #include <inttypes.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <string.h>
 
-#include "context.h"
-#include "buffer.h"
-#include "text.h"
+#include "prelude.h"
 
 
 void textobj_init(Context *ctx, TextObj *obj, const Text *text)

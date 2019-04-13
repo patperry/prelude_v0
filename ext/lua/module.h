@@ -1,12 +1,7 @@
 #ifndef LUA_MODULE_H
 #define LUA_MODULE_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-
-#include "context.h"
-#include "text.h"
+#include "prelude.h"
 
 #include "lua.h"
 

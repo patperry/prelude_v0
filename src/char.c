@@ -1,10 +1,6 @@
 #include <assert.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 
-#include "context.h"
-#include "text.h"
+#include "prelude.h"
 
 /*
   Source:

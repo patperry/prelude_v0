@@ -10,6 +10,25 @@
 #include "text.h"
 
 
+void textobj_init(Context *ctx, TextObj *obj, const Text *text)
+{
+    size_t size = (size_t)text->size * sizeof(*text->bytes);
+    memset(obj, 0, sizeof(*obj));
+    obj->text.bytes = context_alloc(ctx, size);
+    if (obj->text.bytes) {
+        obj->text.unescape = text->unescape;
+        obj->text.size = text->size;
+    }
+}
+
+
+void textobj_deinit(Context *ctx, TextObj *obj)
+{
+    context_free(ctx, (void *)obj->text.bytes,
+                 obj->text.size * sizeof(*obj->text.bytes));
+}
+
+
 Error textbuild_reserve(Context *ctx, TextBuild *build, int32_t extra)
 {
     void *bytes = build->bytes;

@@ -119,6 +119,14 @@ typedef struct {
     unsigned int size     : 31;
 } Text;
 
+typedef struct {
+    Text text;
+} TextObj;
+
+
+void textobj_init(Context *ctx, TextObj *obj, const Text *text);
+void textobj_deinit(Context *ctx, TextObj *obj);
+
 
 typedef enum {
 	TEXT_VIEW_VALIDATE = 0,

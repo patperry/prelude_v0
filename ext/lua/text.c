@@ -93,14 +93,16 @@ static int decode(lua_State *L)
     }
 
     Context *ctx = lmodule_open(L);
-    Text *text = lua_newuserdata(L, sizeof(*text));
-    Error error = text_view(ctx, text, flags, (const uint8_t *)input, len);
+    TextObj *obj = lua_newuserdata(L, sizeof(*obj));
+    Text text;
+    Error error = text_view(ctx, &text, flags, (const uint8_t *)input, len);
     int nret;
 
     switch (error) {
     case ERROR_NONE:
         luaL_getmetatable(L, "text");
         lua_setmetatable(L, -2);
+        textobj_init(ctx, obj, &text);
         nret = 1;
         break;
 
@@ -152,6 +154,17 @@ static int tostring(lua_State *L)
 }
 
 
+static int gc(lua_State *L)
+{
+    Context *ctx = lmodule_open(L);
+    TextObj *obj = lua_touserdata(L, 1);
+    textobj_deinit(ctx, obj);
+    lmodule_close(L, ctx);
+    return 0;
+}
+
+
+
 static const struct luaL_Reg textlib_f[] = {
     {"char", char_},
     {"codepoint", codepoint},
@@ -162,6 +175,7 @@ static const struct luaL_Reg textlib_f[] = {
 
 static const struct luaL_Reg textlib_m[] = {
     {"__eq", eq},
+    {"__gc", gc},
     {"__len", len},
     {"__tostring", tostring},
     {NULL, NULL}

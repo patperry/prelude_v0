@@ -29,7 +29,7 @@ LUA_LIB_O =	$(LUASRC)/lauxlib.o $(LUASRC)/lbaselib.o $(LUASRC)/lbitlib.o \
 			ext/lua/linit.o
 LUA_EXT_O = ext/lua/lprelude.o ext/lua/text.o
 LUA_BASE_O = $(LUA_CORE_O) $(LUA_LIB_O) $(LUA_EXT_O)
-LUA = bin/lua
+LUA = ./bin/lua
 
 ALL_O = $(LIBRARY_O) $(LUA_BASE_O) $(LUASRC)/lua.o src/main/schema.o
 ALL_T = $(LIBRARY_A) bin/lua bin/schema

@@ -4,7 +4,7 @@ RANLIB = ranlib
 
 LIBS += -lm
 CFLAGS += -Wall -Wextra -pedantic -Werror -g
-CPPFLAGS += -Isrc -Ilib/lua-5.3.5/src
+CPPFLAGS += -Isrc
 LDFLAGS = -g
 
 LIBRARY_A = src/library.a
@@ -12,7 +12,7 @@ LIBRARY_O = src/array.o src/char.o src/context.o src/memory.o src/text.o \
 			src/textalloc.o src/textbuild.o src/textiter.o
 
 LUASRC = lib/lua-5.3.5/src
-LUA_CPPFLAGS = -DLUA_USE_READLINE
+LUA_CPPFLAGS = -DLUA_USE_READLINE -I$(LUASRC)
 LUA_LIBS = -lreadline
 LUA_A = $(LUASRC)/liblua.a
 LUA_CORE_O = $(LUASRC)/lapi.o $(LUASRC)/lcode.o $(LUASRC)/lctype.o \
@@ -30,7 +30,7 @@ LUA_EXT_O = ext/lua/linit.o ext/lua/module.o ext/lua/text.o
 LUA_BASE_O = $(LUA_CORE_O) $(LUA_LIB_O) $(LUA_EXT_O)
 LUA = bin/lua
 
-ALL_O = $(LIB_O) $(LUA_BASE_O) $(LUASRC)/lua.o src/main/schema.o
+ALL_O = $(LIBRARY_O) $(LUA_BASE_O) $(LUASRC)/lua.o src/main/schema.o
 ALL_T = $(LIBRARY_A) bin/lua bin/schema
 ALL_A = $(LIBRARY_A) $(LUA_A)
 
@@ -46,13 +46,19 @@ $(LUA_A): $(LUA_BASE_O)
 	$(RANLIB) $@
 
 bin/lua: $(LUASRC)/lua.o $(LUA_A) $(LIBRARY_A)
-	$(CC) -o $@ $(LDFLAGS) $^ $(LIBS) $(LUA_LIBS)
-
-$(LUASRC)/lua.o: $(LUASRC)/lua.c
-	$(CC) -c -o $@ $(CPPFLAGS) $(LUA_CPPFLAGS) $(CFLAGS) $<
+	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS) $(LUA_LIBS)
 
 bin/schema: src/main/schema.o $(LIBRARY_A)
-	$(CC) -o $@ $(LDFLAGS) $^ $(LIBS)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+src/%.o : src/%.c src/prelude.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
+
+$(LUASRC)/%.o : $(LUASRC)/%.c
+	$(CC) $(CPPFLAGS) $(LUA_CPPFLAGS) $(CFLAGS) -c -o $@ $<
+
+ext/lua/%.o : ext/lua/%.c src/prelude.h
+	$(CC) $(CPPFLAGS) $(LUA_CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
 .PHONY: clean
 clean:
@@ -61,12 +67,3 @@ clean:
 .PHONY: check
 check:
 	$(LUA) tests/all.lua
-
-src/array.o: src/array.c src/prelude.h
-src/char.o: src/char.c src/prelude.h
-src/context.o: src/context.c src/prelude.h
-src/text.o: src/text.c src/prelude.h
-
-ext/lua/module.h: src/prelude.h
-ext/lua/module.o: ext/lua/module.c ext/lua/module.h
-ext/lua/text.o: ext/lua/text.c ext/lua/module.h

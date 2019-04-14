@@ -1,4 +1,3 @@
-
 -- valid text
 assert(text.decode("hello world"))
 assert(text.decode("B\xC5\x93uf Bourguignon"))

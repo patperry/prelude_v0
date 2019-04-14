@@ -47,7 +47,7 @@ static int codepoint(lua_State *L)
     int nret = 0;
 
     if (i < 0 || j < 0) {
-        lua_Integer n = (lua_Integer)text_len(ctx, text);
+        lua_Integer n = (lua_Integer)text_length(ctx, text);
         if (i < 0) {
             i = (n + i) + 1;
         }
@@ -132,7 +132,7 @@ static int eq(lua_State *L)
     Context *ctx = lmodule_open(L);
     const Text *text1 = luaL_checkudata(L, 1, "text");
     const Text *text2 = luaL_checkudata(L, 2, "text");
-    bool eq = text_eq(ctx, text1, text2);
+    bool eq = text_equal(ctx, text1, text2);
     lua_pushboolean(L, (int)eq);
     lmodule_close(L, ctx);
     return 1;
@@ -143,7 +143,7 @@ static int len(lua_State *L)
 {
     Context *ctx = lmodule_open(L);
     const Text *text = luaL_checkudata(L, 1, "text");
-    int32_t len = text_len(ctx, text);
+    int32_t len = text_length(ctx, text);
     lua_pushinteger(L, (lua_Integer)len);
     lmodule_close(L, ctx);
     return 1;

@@ -90,7 +90,7 @@ out:
 }
 
 
-int32_t text_len(Context *ctx, const Text *text)
+int32_t text_length(Context *ctx, const Text *text)
 {
     int32_t len = 0;
     TextIter it;
@@ -105,7 +105,7 @@ int32_t text_len(Context *ctx, const Text *text)
 }
 
 
-bool text_eq(Context *ctx, const Text *text1, const Text *text2)
+bool text_equal(Context *ctx, const Text *text1, const Text *text2)
 {
     (void)ctx;
     if (text1 == text2) {

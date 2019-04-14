@@ -25,8 +25,9 @@ LUA_CORE_O = $(LUASRC)/lapi.o $(LUASRC)/lcode.o $(LUASRC)/lctype.o \
 LUA_LIB_O =	$(LUASRC)/lauxlib.o $(LUASRC)/lbaselib.o $(LUASRC)/lbitlib.o \
 			$(LUASRC)/lcorolib.o $(LUASRC)/ldblib.o $(LUASRC)/liolib.o \
 			$(LUASRC)/lmathlib.o $(LUASRC)/loslib.o $(LUASRC)/lstrlib.o \
-			$(LUASRC)/ltablib.o $(LUASRC)/lutf8lib.o $(LUASRC)/loadlib.o
-LUA_EXT_O = ext/lua/linit.o ext/lua/module.o ext/lua/text.o
+			$(LUASRC)/ltablib.o $(LUASRC)/lutf8lib.o $(LUASRC)/loadlib.o \
+			ext/lua/linit.o
+LUA_EXT_O = ext/lua/lprelude.o ext/lua/text.o
 LUA_BASE_O = $(LUA_CORE_O) $(LUA_LIB_O) $(LUA_EXT_O)
 LUA = bin/lua
 
@@ -57,7 +58,7 @@ src/%.o : src/%.c src/prelude.h
 $(LUASRC)/%.o : $(LUASRC)/%.c
 	$(CC) $(CPPFLAGS) $(LUA_CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
-ext/lua/%.o : ext/lua/%.c src/prelude.h
+ext/lua/%.o : ext/lua/%.c ext/lua/lprelude.h src/prelude.h
 	$(CC) $(CPPFLAGS) $(LUA_CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
 .PHONY: clean

@@ -1,22 +1,20 @@
-#include "lua.h"
-#include "lauxlib.h"
-#include "module.h"
+#include "lprelude.h"
 
 
 void pushtext(lua_State *L, const Text *text)
 {
-    Context *ctx = lmodule_open(L);
+    Context *ctx = lprelude_open(L);
     TextAlloc *obj = lua_newuserdata(L, sizeof(*obj));
     luaL_getmetatable(L, "text");
     lua_setmetatable(L, -2);
     textalloc_init(ctx, obj, text);
-    lmodule_close(L, ctx);
+    lprelude_close(L, ctx);
 }
 
 
 static int char_(lua_State *L)
 {
-    Context *ctx = lmodule_open(L);
+    Context *ctx = lprelude_open(L);
     int i, n = lua_gettop(L);
     TextBuild build;
 
@@ -32,14 +30,14 @@ static int char_(lua_State *L)
     Text text = textbuild_get(ctx, &build);
     pushtext(L, &text);
     textbuild_deinit(ctx, &build);
-    lmodule_close(L, ctx);
+    lprelude_close(L, ctx);
     return 1;
 }
 
 
 static int codepoint(lua_State *L)
 {
-    Context *ctx = lmodule_open(L);
+    Context *ctx = lprelude_open(L);
     const Text *text = luaL_checkudata(L, 1, "text");
     lua_Integer i = luaL_optinteger(L, 2, 1);
     lua_Integer j = luaL_optinteger(L, 3, i);
@@ -78,7 +76,7 @@ static int codepoint(lua_State *L)
     }
 out:
     textiter_deinit(ctx, &it);
-    lmodule_close(L, ctx);
+    lprelude_close(L, ctx);
     return nret;
 }
 
@@ -87,7 +85,7 @@ static int view(lua_State *L, TextViewType flags)
 {
     size_t len;
     const char *input = luaL_checklstring(L, 1, &len);
-    Context *ctx = lmodule_open(L);
+    Context *ctx = lprelude_open(L);
     Text text;
     Error error = text_view(ctx, &text, flags, (const uint8_t *)input, len);
     int nret;
@@ -110,7 +108,7 @@ static int view(lua_State *L, TextViewType flags)
         break;
     }
 
-    lmodule_close(L, ctx);
+    lprelude_close(L, ctx);
     return nret;
 }
 
@@ -129,23 +127,23 @@ static int unescape(lua_State *L)
 
 static int eq(lua_State *L)
 {
-    Context *ctx = lmodule_open(L);
+    Context *ctx = lprelude_open(L);
     const Text *text1 = luaL_checkudata(L, 1, "text");
     const Text *text2 = luaL_checkudata(L, 2, "text");
     bool eq = text_equal(ctx, text1, text2);
     lua_pushboolean(L, (int)eq);
-    lmodule_close(L, ctx);
+    lprelude_close(L, ctx);
     return 1;
 }
 
 
 static int len(lua_State *L)
 {
-    Context *ctx = lmodule_open(L);
+    Context *ctx = lprelude_open(L);
     const Text *text = luaL_checkudata(L, 1, "text");
     int32_t len = text_length(ctx, text);
     lua_pushinteger(L, (lua_Integer)len);
-    lmodule_close(L, ctx);
+    lprelude_close(L, ctx);
     return 1;
 }
 
@@ -160,10 +158,10 @@ static int tostring(lua_State *L)
 
 static int gc(lua_State *L)
 {
-    Context *ctx = lmodule_open(L);
+    Context *ctx = lprelude_open(L);
     TextAlloc *obj = lua_touserdata(L, 1);
     textalloc_deinit(ctx, obj);
-    lmodule_close(L, ctx);
+    lprelude_close(L, ctx);
     return 0;
 }
 

@@ -1,8 +1,13 @@
-#include "module.h"
-#include "lua.h"
-#include "lauxlib.h"
+#include "lprelude.h"
+
 
 static int gc(lua_State *L);
+
+typedef struct {
+    lua_Alloc alloc_func;
+    void *data;
+} Alloc;
+
 
 static const char ALLOC_KEY = 'k';
 static const char CONTEXT_KEY = 'k';
@@ -12,17 +17,10 @@ static const struct luaL_Reg context_m[] = {
     {NULL, NULL}
 };
 
-
 static const luaL_Reg module_libs[] = {
     {"text", luaopen_text},
     {NULL, NULL}
 };
-
-
-typedef struct {
-    lua_Alloc alloc_func;
-    void *data;
-} Alloc;
 
 
 static void *alloc_func(void *buf, size_t old_size, size_t new_size, void *data)
@@ -32,7 +30,7 @@ static void *alloc_func(void *buf, size_t old_size, size_t new_size, void *data)
 }
 
 
-void lmodule_init(lua_State *L)
+void luaopen_prelude(lua_State *L)
 {
     const luaL_Reg *lib;
 
@@ -62,7 +60,7 @@ void lmodule_init(lua_State *L)
 }
 
 
-Context *lmodule_open(lua_State *L)
+Context *lprelude_open(lua_State *L)
 {
     lua_pushlightuserdata(L, (void *)&CONTEXT_KEY);
     lua_gettable(L, LUA_REGISTRYINDEX);
@@ -72,7 +70,7 @@ Context *lmodule_open(lua_State *L)
 }
 
 
-void lmodule_close(lua_State *L, Context *ctx)
+void lprelude_close(lua_State *L, Context *ctx)
 {
     if (context_error(ctx)) {
         lua_pushstring(L, context_message(ctx));

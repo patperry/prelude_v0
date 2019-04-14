@@ -34,7 +34,8 @@
 #include "lualib.h"
 #include "lauxlib.h"
 
-#include "module.h"
+void luaopen_prelude(lua_State *L);
+
 
 /*
 ** these libs are loaded by lua.c and are readily available to any Lua
@@ -65,5 +66,5 @@ LUALIB_API void luaL_openlibs (lua_State *L) {
     luaL_requiref(L, lib->name, lib->func, 1);
     lua_pop(L, 1);  /* remove lib */
   }
-  lmodule_init(L);
+  luaopen_prelude(L);
 }

@@ -6,9 +6,6 @@
 #include "prelude.h"
 
 
-static void context_log(Context *ctx, LogType log, const char *format,
-                        va_list args);
-
 static void *alloc_default(void *buf, size_t old_size, size_t new_size,
                            void *data);
 
@@ -70,34 +67,6 @@ const char *context_message(Context *ctx)
     if (!ctx->error)
         return NULL;
     return ctx->buffer;
-}
-
-
-
-void context_debug(Context *ctx, const char *format, ...)
-{
-    va_list args;
-    va_start(args, format);
-    context_log(ctx, LOG_DEBUG, format, args);
-    va_end(args);
-}
-
-
-void context_info(Context *ctx, const char *format, ...)
-{
-    va_list args;
-    va_start(args, format);
-    context_log(ctx, LOG_INFO, format, args);
-    va_end(args);
-}
-
-
-void context_log(Context *ctx, LogType log, const char *format, va_list args)
-{
-    if (!ctx->error) {
-        vsnprintf(ctx->buffer, sizeof(ctx->buffer), format, args);
-        (ctx->log)(log, ctx->buffer, ctx->log_data);
-    }
 }
 
 

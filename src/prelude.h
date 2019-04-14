@@ -50,18 +50,22 @@ void context_init(Context *ctx, AllocFunc alloc, void *alloc_data,
                   LogFunc log, void *log_data);
 void context_deinit(Context *ctx);
 
-/* errors */
 Error context_panic(Context *ctx, Error error, const char *format, ...)
     __attribute__ ((format (printf, 3, 4)));
 void context_recover(Context *ctx);
 Error context_error(Context *ctx);
 const char *context_message(Context *ctx);
 
+/**@}*/
 
-/* logging */
-void context_debug(Context *ctx, const char *format, ...)
+/**
+ * \defgroup log Logging
+ * @{
+ */
+
+void log_debug(Context *ctx, const char *format, ...)
     __attribute__ ((format (printf, 2, 3)));
-void context_info(Context *ctx, const char *format, ...)
+void log_info(Context *ctx, const char *format, ...)
     __attribute__ ((format (printf, 2, 3)));
 
 /**@}*/

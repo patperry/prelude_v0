@@ -29,7 +29,7 @@
 */
 
 
-Error char_scan(Context *ctx, const uint8_t **pptr, const uint8_t *end)
+Error char_scan_utf8(Context *ctx, const uint8_t **pptr, const uint8_t *end)
 {
     const uint8_t *ptr = *pptr;
     uint_fast8_t ch, ch1;
@@ -196,83 +196,83 @@ static Error char_scan_uescape(Context *ctx, const uint8_t **pptr,
                                const uint8_t *end)
 {
     const uint8_t *input = *pptr;
-	const uint8_t *ptr = input;
-	int32_t code, low;
-	uint_fast8_t ch;
-	unsigned i;
-	int err;
+    const uint8_t *ptr = input;
+    int32_t code, low;
+    uint_fast8_t ch;
+    unsigned i;
+    int err;
 
-	if (ptr + 4 > end) {
-		goto error_inval_incomplete;
-	}
+    if (ptr + 4 > end) {
+        goto error_inval_incomplete;
+    }
 
-	code = 0;
-	for (i = 0; i < 4; i++) {
-		ch = *ptr++;
-		if (!isxdigit(ch)) {
-			goto error_inval_hex;
-		}
-		code = (code << 4) + hextoi(ch);
-	}
+    code = 0;
+    for (i = 0; i < 4; i++) {
+        ch = *ptr++;
+        if (!isxdigit(ch)) {
+            goto error_inval_hex;
+        }
+        code = (code << 4) + hextoi(ch);
+    }
 
-	if (CHAR32_ISHIGH(code)) {
-		if (ptr + 6 > end || ptr[0] != '\\' || ptr[1] != 'u') {
-			goto error_inval_nolow;
-		}
-		ptr += 2;
-		input = ptr;
+    if (CHAR32_ISHIGH(code)) {
+        if (ptr + 6 > end || ptr[0] != '\\' || ptr[1] != 'u') {
+            goto error_inval_nolow;
+        }
+        ptr += 2;
+        input = ptr;
 
-		low = 0;
-		for (i = 0; i < 4; i++) {
-			ch = *ptr++;
-			if (!isxdigit(ch)) {
-				goto error_inval_hex;
-			}
-			low = (low << 4) + hextoi(ch);
-		}
-		if (!CHAR32_ISLOW(low)) {
-			ptr -= 6;
-			goto error_inval_low;
-		}
-	} else if (CHAR32_ISLOW(code)) {
-		goto error_inval_nohigh;
-	}
+        low = 0;
+        for (i = 0; i < 4; i++) {
+            ch = *ptr++;
+            if (!isxdigit(ch)) {
+                goto error_inval_hex;
+            }
+            low = (low << 4) + hextoi(ch);
+        }
+        if (!CHAR32_ISLOW(low)) {
+            ptr -= 6;
+            goto error_inval_low;
+        }
+    } else if (CHAR32_ISLOW(code)) {
+        goto error_inval_nohigh;
+    }
 
-	err = ERROR_NONE;
-	goto out;
+    err = ERROR_NONE;
+    goto out;
 
 error_inval_incomplete:
-	err = context_panic(ctx, ERROR_VALUE, "incomplete escape code (\\u%.*s)",
-			            (int)(end - input), input);
-	goto out;
+    err = context_panic(ctx, ERROR_VALUE, "incomplete escape code (\\u%.*s)",
+                        (int)(end - input), input);
+    goto out;
 
 error_inval_hex:
-	err = context_panic(ctx, ERROR_VALUE,
+    err = context_panic(ctx, ERROR_VALUE,
                         "invalid hex value in escape code (\\u%.*s)", 4, input);
-	goto out;
+    goto out;
 
 error_inval_nolow:
-	err = context_panic(ctx, ERROR_VALUE, "missing UTF-16 low surrogate"
-			            " after high surrogate escape code (\\u%.*s)",
+    err = context_panic(ctx, ERROR_VALUE, "missing UTF-16 low surrogate"
+                        " after high surrogate escape code (\\u%.*s)",
                         4, input);
-	goto out;
+    goto out;
 
 error_inval_low:
-	err = context_panic(ctx, ERROR_VALUE,
+    err = context_panic(ctx, ERROR_VALUE,
                         "invalid UTF-16 low surrogate (\\u%.*s)"
-			            " after high surrogate escape code (\\u%.*s)",
+                        " after high surrogate escape code (\\u%.*s)",
                         4, input, 4, input - 6);
-	goto out;
+    goto out;
 
 error_inval_nohigh:
-	err = context_panic(ctx, ERROR_VALUE, "missing UTF-16 high surrogate"
-			            " before low surrogate escape code (\\u%.*s)",
-			            4, input);
-	goto out;
+    err = context_panic(ctx, ERROR_VALUE, "missing UTF-16 high surrogate"
+                        " before low surrogate escape code (\\u%.*s)",
+                        4, input);
+    goto out;
 
 out:
-	*pptr = ptr;
-	return err;
+    *pptr = ptr;
+    return err;
 }
 
 
@@ -324,10 +324,109 @@ out:
 }
 
 
+Char32 char_decode_utf8(Context *ctx, const uint8_t **pptr)
+{
+    (void)ctx;
+
+    const uint8_t *ptr = *pptr;
+    Char32 code;
+    uint_fast8_t ch;
+    unsigned nc;
+
+    ch = *ptr++;
+    if (!(ch & 0x80)) {
+        code = ch;
+        nc = 0;
+    } else if (!(ch & 0x20)) {
+        code = ch & 0x1F;
+        nc = 1;
+    } else if (!(ch & 0x10)) {
+        code = ch & 0x0F;
+        nc = 2;
+    } else {
+        code = ch & 0x07;
+        nc = 3;
+    }
+
+    while (nc-- > 0) {
+        ch = *ptr++;
+        code = (code << 6) + (ch & 0x3F);
+    }
+
+    *pptr = ptr;
+    return code;
+}
+
+
+static Char32 char_decode_uescape(Context *ctx, const uint8_t **pptr)
+{
+    (void)ctx;
+
+    const uint8_t *ptr = *pptr;
+    Char32 code;
+    uint_fast16_t low;
+    uint_fast8_t ch;
+    unsigned i;
+
+    code = 0;
+    for (i = 0; i < 4; i++) {
+        ch = *ptr++;
+        code = (code << 4) + hextoi(ch);
+    }
+
+    if (CHAR32_ISHIGH(code)) {
+        // skip over \u
+        ptr += 2;
+
+        low = 0;
+        for (i = 0; i < 4; i++) {
+            ch = *ptr++;
+            low = (uint_fast16_t)(low << 4) + hextoi(ch);
+        }
+
+        code = CHAR32_DECODE_HIGHLOW(code, low);
+    }
+
+    *pptr = ptr;
+    return code;
+}
+
+
+Char32 char_decode_escape(Context *ctx, const uint8_t **pptr)
+{
+    const uint8_t *ptr = *pptr;
+    Char32 code = (Char32)*ptr++;
+
+    switch (code) {
+    case 'b':
+        code = '\b';
+        break;
+    case 'f':
+        code = '\f';
+        break;
+    case 'n':
+        code = '\n';
+        break;
+    case 'r':
+        code = '\r';
+        break;
+    case 't':
+        code = '\t';
+        break;
+    case 'u':
+        *pptr = ptr;
+        return char_decode_uescape(ctx, pptr);
+    default:
+        break;
+    }
+
+    *pptr = ptr;
+    return code;
+}
 
 
 // http://www.fileformat.info/info/unicode/utf8.htm
-void char_encode(Context *ctx, Char32 code, uint8_t **pptr)
+void char_encode_utf8(Context *ctx, Char32 code, uint8_t **pptr)
 {
     (void)ctx;
     uint8_t *ptr = *pptr;

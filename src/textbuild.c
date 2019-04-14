@@ -51,6 +51,6 @@ void textbuild_char(Context *ctx, TextBuild *build, Char32 code)
         return;
 
     uint8_t *end = build->bytes + build->count;
-    char_encode(ctx, code, &end);
+    char_encode_utf8(ctx, code, &end);
     build->count += extra;
 }

@@ -120,7 +120,6 @@ typedef int32_t Char32;
      (u) <= 0x07FF  ? 2 : \
      (u) <= 0xFFFF  ? 3 : 4)
 
-
 /** Indicates whether a 16-bit code unit is a UTF-16 high surrogate.
  *  High surrogates are in the range 0xD800 `(1101 1000 0000 0000)`
  *  to 0xDBFF `(1101 1011 1111 1111)`. */
@@ -131,7 +130,9 @@ typedef int32_t Char32;
  *  to 0xDFFF `(1101 1111 1111 1111)`. */
 #define CHAR32_ISLOW(x) (((x) & 0xFC00) == 0xDC00)
 
-
+/** Given the high and low UTF-16 surrogates, compute the unicode codepoint. */
+#define CHAR32_DECODE_HIGHLOW(h, l) \
+	(((((h) & 0x3FF) << 10) | ((l) & 0x3FF)) + 0x10000)
 
 /**
  * Scan over the first code point in a UTF-8 buffer, updating `*pptr` to
@@ -139,7 +140,7 @@ typedef int32_t Char32;
  *
  * Returns ERROR_VALUE for invalid UTF-8.
  */
-Error char_scan(Context *ctx, const uint8_t **pptr, const uint8_t *end);
+Error char_scan_utf8(Context *ctx, const uint8_t **pptr, const uint8_t *end);
 
 /**
  * Scan a JSON-style backslash (\\) escape.
@@ -152,13 +153,18 @@ Error char_scan_escape(Context *ctx, const uint8_t **pptr, const uint8_t *end);
  * Decode the first code point from a UTF-8 character buffer, without
  * validating the input.
  */ 
-Char32 char_decode(Context *ctx, const uint8_t *pptr);
+Char32 char_decode_utf8(Context *ctx, const uint8_t **pptr);
+
+/**
+ * Decode a JSON-style backslash (\\) escape, without validating the input.
+ */
+Char32 char_decode_escape(Context *ctx, const uint8_t **pptr);
 
 /**
  * Encode a code point into UTF-8. Writes `UTF8_LEN(code)` bytes and
  * updates `pptr`.
  */
-void char_encode(Context *ctx, Char32 code, uint8_t **pptr);
+void char_encode_utf8(Context *ctx, Char32 code, uint8_t **pptr);
 
 /**
  * Character width type.

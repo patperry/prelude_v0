@@ -29,7 +29,7 @@ Error text_view(Context *ctx, Text *text, TextViewType flags,
                 }
             } else if (ch & 0x80) {
                 ptr--;
-                if ((err = char_scan(ctx, &ptr, end))) {
+                if ((err = char_scan_utf8(ctx, &ptr, end))) {
                     goto out;
                 }
             }
@@ -39,7 +39,7 @@ Error text_view(Context *ctx, Text *text, TextViewType flags,
             ch = *ptr++;
             if (ch & 0x80) {
                 ptr--;
-                if ((err = char_scan(ctx, &ptr, end))) {
+                if ((err = char_scan_utf8(ctx, &ptr, end))) {
                     goto out;
                 }
             }

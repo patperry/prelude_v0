@@ -28,15 +28,31 @@ assert(not text.unescape("\\uDFFF low surrogate"))
 assert(not text.unescape("\\uD84 incomplete"))
 assert(not text.unescape("\\uD804\\u2603 invalid low"))
 
--- escaping
+-- unescaping
+assert(text.unescape("\\\\") == text.decode("\\"))
+assert(text.unescape("\\/") == text.decode("/"))
+assert(text.unescape("\\\"") == text.decode("\""))
+assert(text.unescape("\\b") == text.decode("\b"))
+assert(text.unescape("\\f") == text.decode("\f"))
 assert(text.unescape("\\n") == text.decode("\n"))
+assert(text.unescape("\\r") == text.decode("\r"))
+assert(text.unescape("\\t") == text.decode("\t"))
+assert(text.unescape("\\u2603") == text.decode("\xE2\x98\x83"))
+assert(text.unescape("\\u0024") == text.decode("\x24"))
+assert(text.unescape("\\uD801\\uDC37") == text.decode("\xF0\x90\x90\xB7"))
+assert(text.unescape("\\uD852\\uDF62") == text.decode("\xF0\xA4\xAD\xA2"))
+
+-- tostring
 assert(tostring(text.unescape("\\n")) == "\n")
 
 -- equality
 x = text.decode("x")
 assert(x == x)
-assert(text.decode("x") == text.decode("x"))
 assert(text.decode("") == text.char())
+assert(text.decode("x") == text.decode("x"))
+assert(text.decode("hello") ~= text.decode("hell"))
+assert(text.decode("hell") ~= text.decode("hello"))
+assert(text.decode("hello") ~= text.decode("hell_"))
 assert(text.decode("hello") == text.char(0x68, 0x65, 0x6c, 0x6c, 0x6f))
 assert(text.unescape("hello\\nworld") == text.decode("hello\nworld"))
 assert(text.unescape("hello\\nworld") ~= text.decode("hello\\nworld"))

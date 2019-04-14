@@ -110,16 +110,42 @@ bool text_eq(Context *ctx, const Text *text1, const Text *text2)
     (void)ctx;
     if (text1 == text2) {
         return true;
-    } else if (text1->bytes == text2->bytes
-            && text1->unescape == text2->unescape
-            && text1->size == text2->size) {
-        return true;
-    } else if (text1->size == text2->size
-            && !text1->unescape && !text2->unescape) {
-        return memcmp(text1->bytes, text2->bytes,
-                      text1->size * sizeof(*text1->bytes)) == 0;
+    } else if (!text1->unescape && !text2->unescape) {
+        if (text1->size != text2->size) {
+            return false;
+        } else if (text1->bytes == text2->bytes) {
+            return true;
+        } else {
+            return !memcmp(text1->bytes, text2->bytes,
+                           text1->size * sizeof(*text1->bytes));
+        }
     }
-    return false;
+
+    TextIter it1, it2;
+    textiter_init(ctx, &it1, text1);
+    textiter_init(ctx, &it2, text1);
+    bool ret;
+
+    while (textiter_advance(ctx, &it1)) {
+        if (!textiter_advance(ctx, &it2)) {
+            ret = false;
+            goto out;
+        } else if (it1.current != it2.current) {
+            ret = false;
+            goto out;
+        }
+    }
+
+    if (textiter_advance(ctx, &it2)) {
+        ret = false;
+        goto out;
+    }
+
+    ret = true;
+out:
+    textiter_deinit(ctx, &it2);
+    textiter_deinit(ctx, &it1);
+    return ret;
 }
 
 

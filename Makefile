@@ -5,7 +5,7 @@ RANLIB = ranlib
 LIBS += -lm
 CFLAGS += -Wall -Wextra -pedantic -Werror -g
 CPPFLAGS += -Isrc
-LDFLAGS = -g
+LDFLAGS += -g
 
 LIBRARY_A = src/library.a
 LIBRARY_O = src/array.o src/char.o src/context.o src/log.o src/memory.o \

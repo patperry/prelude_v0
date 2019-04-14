@@ -7,6 +7,7 @@
  * Data environment.
  */
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -56,11 +57,6 @@ void context_recover(Context *ctx);
 Error context_error(Context *ctx);
 const char *context_message(Context *ctx);
 
-/* memory */
-void *context_alloc(Context *ctx, size_t size);
-void *context_realloc(Context *ctx, void *buf, size_t old_size,
-                      size_t new_size);
-void context_free(Context *ctx, void *buf, size_t size);
 
 /* logging */
 void context_debug(Context *ctx, const char *format, ...)
@@ -71,13 +67,29 @@ void context_info(Context *ctx, const char *format, ...)
 /**@}*/
 
 /**
- * \defgroup buffer Memory buffer
+ * \defgroup memory Memory
  * @{
  */
 
-Error buffer_reserve(Context *ctx, void **pbuf, size_t width,
-                     int32_t *pcapacity, int32_t count, int32_t extra);
-    
+/* memory */
+void *memory_alloc(Context *ctx, size_t size);
+void *memory_realloc(Context *ctx, void *buf, size_t old_size,
+                     size_t new_size);
+void memory_free(Context *ctx, void *buf, size_t size);
+
+void memory_clear(Context *ctx, void *buf, size_t size);
+bool memory_equal(Context *ctx, const void *buf1, const void *buf2,
+                  size_t size);
+
+
+/**
+ * \defgroup array Dynamic array
+ * @{
+ */
+
+Error array_reserve(Context *ctx, void **pbase, size_t width,
+                    int32_t *pcapacity, int32_t count, int32_t extra);
+
 /**@}*/
 
 /**
@@ -259,10 +271,10 @@ int32_t text_length(Context *ctx, const Text *text);
 
 typedef struct {
     Text text;
-} TextObj;
+} TextAlloc;
 
-void textobj_init(Context *ctx, TextObj *obj, const Text *text);
-void textobj_deinit(Context *ctx, TextObj *obj);
+void textalloc_init(Context *ctx, TextAlloc *obj, const Text *text);
+void textalloc_deinit(Context *ctx, TextAlloc *obj);
 
 /**
  * Iterator over the decoded UTF-32 code points in a text.

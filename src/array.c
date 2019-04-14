@@ -5,18 +5,18 @@
 
 
 /* Default initial size for nonempty dynamic arrays. Must be positive. */
-#define BUFFER_INIT 32
+#define ARRAY_INIT 32
 
 /* Growth factor for dynamic arrays. Must be greater than 1. */
-#define BUFFER_GROW 1.618 /* Golden Ratio, (1 + sqrt(5)) / 2 */
+#define ARRAY_GROW 1.618 /* Golden Ratio, (1 + sqrt(5)) / 2 */
 
 
-static Error buffer_size(Context *ctx, size_t width, int32_t *pcapacity,
-                         int32_t count, int32_t extra);
+static Error array_size(Context *ctx, size_t width, int32_t *pcapacity,
+                        int32_t count, int32_t extra);
 
 
-Error buffer_reserve(Context *ctx, void **pbuf, size_t width,
-                     int32_t *pcapacity, int32_t count, int32_t extra)
+Error array_reserve(Context *ctx, void **pbase, size_t width,
+                    int32_t *pcapacity, int32_t count, int32_t extra)
 {
     int32_t old_capacity = *pcapacity;
     if (old_capacity < 0) {
@@ -24,7 +24,7 @@ Error buffer_reserve(Context *ctx, void **pbuf, size_t width,
     }
 
     int32_t new_capacity = old_capacity;
-    Error err = buffer_size(ctx, width, &new_capacity, count, extra);
+    Error err = array_size(ctx, width, &new_capacity, count, extra);
     if (err) {
         return err;
     }
@@ -32,19 +32,19 @@ Error buffer_reserve(Context *ctx, void **pbuf, size_t width,
     size_t old_size = (size_t)old_capacity * width;
     size_t new_size = (size_t)new_capacity * width;
 
-    void *buf = context_realloc(ctx, *pbuf, old_size, new_size);
-    if (!buf) {
+    void *base = memory_realloc(ctx, *pbase, old_size, new_size);
+    if (!base) {
         return context_error(ctx);
     }
 
-    *pbuf = buf;
+    *pbase = base;
     *pcapacity = new_capacity;
     return ERROR_NONE;
 }
 
 
-Error buffer_size(Context *ctx, size_t width, int32_t *pcapacity,
-                  int32_t count, int32_t extra)
+Error array_size(Context *ctx, size_t width, int32_t *pcapacity,
+                 int32_t count, int32_t extra)
 {
     assert(width > 0);
     assert(count >= 0);
@@ -73,15 +73,15 @@ Error buffer_size(Context *ctx, size_t width, int32_t *pcapacity,
 
     assert((size_t)capacity <= SIZE_MAX / width);
 
-	assert(BUFFER_INIT > 0);
-	assert(BUFFER_GROW > 1);
+	assert(ARRAY_INIT > 0);
+	assert(ARRAY_GROW > 1);
 
-	if (capacity < BUFFER_INIT && capacity_min > 0) {
-		capacity = BUFFER_INIT;
+	if (capacity < ARRAY_INIT && capacity_min > 0) {
+		capacity = ARRAY_INIT;
 	}
 
 	while (capacity < capacity_min) {
-		double n = BUFFER_GROW * capacity;
+		double n = ARRAY_GROW * capacity;
         if (n > INT32_MAX) {
             n = INT32_MAX;
         }

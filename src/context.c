@@ -5,6 +5,7 @@
 #include <time.h>
 #include "prelude.h"
 
+
 static void context_log(Context *ctx, LogType log, const char *format,
                         va_list args);
 
@@ -71,29 +72,6 @@ const char *context_message(Context *ctx)
     return ctx->buffer;
 }
 
-
-void *context_alloc(Context *ctx, size_t size)
-{
-    return context_realloc(ctx, NULL, 0, size);
-}
-
-
-void context_free(Context *ctx, void *buf, size_t size)
-{
-    context_realloc(ctx, buf, size, 0);
-}
-
-
-void *context_realloc(Context *ctx, void *buf, size_t old_size,
-                      size_t new_size)
-{
-    buf = (ctx->alloc)(buf, old_size, new_size, ctx->alloc_data);
-    if (!buf && new_size) {
-        context_panic(ctx, ERROR_MEMORY, "failed allocating %zu bytes",
-                      new_size);
-    }
-    return buf;
-}
 
 
 void context_debug(Context *ctx, const char *format, ...)

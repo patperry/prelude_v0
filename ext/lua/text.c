@@ -6,10 +6,10 @@
 void pushtext(lua_State *L, const Text *text)
 {
     Context *ctx = lmodule_open(L);
-    TextObj *obj = lua_newuserdata(L, sizeof(*obj));
+    TextAlloc *obj = lua_newuserdata(L, sizeof(*obj));
     luaL_getmetatable(L, "text");
     lua_setmetatable(L, -2);
-    textobj_init(ctx, obj, text);
+    textalloc_init(ctx, obj, text);
     lmodule_close(L, ctx);
 }
 
@@ -161,8 +161,8 @@ static int tostring(lua_State *L)
 static int gc(lua_State *L)
 {
     Context *ctx = lmodule_open(L);
-    TextObj *obj = lua_touserdata(L, 1);
-    textobj_deinit(ctx, obj);
+    TextAlloc *obj = lua_touserdata(L, 1);
+    textalloc_deinit(ctx, obj);
     lmodule_close(L, ctx);
     return 0;
 }

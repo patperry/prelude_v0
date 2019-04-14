@@ -43,6 +43,17 @@ Text textbuild_get(Context *ctx, TextBuild *build)
 }
 
 
+void textbuild_text(Context *ctx, TextBuild *build, const Text *text)
+{
+    TextIter it;
+    textiter_init(ctx, &it, text);
+    while (textiter_advance(ctx, &it)) {
+        textbuild_char(ctx, build, it.current);
+    }
+    textiter_deinit(ctx, &it);
+}
+
+
 void textbuild_char(Context *ctx, TextBuild *build, Char32 code)
 {
     int32_t extra = CHAR32_UTF8_COUNT(code);

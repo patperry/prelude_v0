@@ -88,7 +88,7 @@ bool text_equal(Context *ctx, const Text *text1, const Text *text2)
 
     TextIter it1, it2;
     textiter_init(ctx, &it1, text1);
-    textiter_init(ctx, &it2, text1);
+    textiter_init(ctx, &it2, text2);
     bool ret;
 
     while (textiter_advance(ctx, &it1)) {

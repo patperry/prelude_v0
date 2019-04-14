@@ -312,8 +312,10 @@ void textbuild_init(Context *ctx, TextBuild *build);
 void textbuild_clear(Context *ctx, TextBuild *build);
 void textbuild_deinit(Context *ctx, TextBuild *build);
 
-Text textbuild_get(Context *ctx, TextBuild *build);
+void textbuild_text(Context *ctx, TextBuild *build, const Text *text);
 void textbuild_char(Context *ctx, TextBuild *build, Char32 code);
+Text textbuild_get(Context *ctx, TextBuild *build);
+
 
 typedef struct {
     Text text;

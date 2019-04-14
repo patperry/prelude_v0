@@ -151,7 +151,18 @@ static int len(lua_State *L)
 static int tostring(lua_State *L)
 {
     const Text *text = luaL_checkudata(L, 1, "text");
-    lua_pushlstring(L, (const char *)text->bytes, text->size);
+    if (!text->unescape) {
+        lua_pushlstring(L, (const char *)text->bytes, text->size);
+    } else {
+        Context *ctx = lprelude_open(L);
+        TextBuild build;
+        textbuild_init(ctx, &build);
+        textbuild_text(ctx, &build, text);
+        Text text = textbuild_get(ctx, &build);
+        lua_pushlstring(L, (const char *)text.bytes, text.size);
+        textbuild_deinit(ctx, &build);
+        lprelude_close(L, ctx);
+    }
     return 1;
 }
 

@@ -28,6 +28,10 @@ assert(not text.unescape("\\uDFFF low surrogate"))
 assert(not text.unescape("\\uD84 incomplete"))
 assert(not text.unescape("\\uD804\\u2603 invalid low"))
 
+-- escaping
+assert(text.unescape("\\n") == text.decode("\n"))
+assert(tostring(text.unescape("\\n")) == "\n")
+
 -- equality
 x = text.decode("x")
 assert(x == x)

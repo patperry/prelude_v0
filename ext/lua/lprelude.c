@@ -22,6 +22,12 @@ static const luaL_Reg module_libs[] = {
     {NULL, NULL}
 };
 
+// override the lua allocator with the prelude default for testing
+static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
+{
+    (void)ud;
+    return default_alloc(ptr, osize, nsize, NULL);
+}
 
 static void *alloc_func(void *buf, size_t old_size, size_t new_size, void *data)
 {
@@ -29,11 +35,11 @@ static void *alloc_func(void *buf, size_t old_size, size_t new_size, void *data)
     return (alloc->alloc_func)(alloc->data, buf, old_size, new_size);
 }
 
-
 void luaopen_prelude(lua_State *L)
 {
     const luaL_Reg *lib;
 
+    lua_setallocf(L, l_alloc, NULL); // for testing
     lua_pushlightuserdata(L, (void *)&ALLOC_KEY);
     Alloc *alloc = lua_newuserdata(L, sizeof(*alloc));
     alloc->alloc_func = lua_getallocf(L, &alloc->data);

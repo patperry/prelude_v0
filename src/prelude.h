@@ -46,6 +46,9 @@ typedef struct {
     Error error;
 } Context;
 
+void *default_alloc(void *buf, size_t old_size, size_t new_size, void *data);
+void default_log(LogType log, const char *message, void *data);
+
 void context_init(Context *ctx, AllocFunc alloc, void *alloc_data,
                   LogFunc log, void *log_data);
 void context_deinit(Context *ctx);

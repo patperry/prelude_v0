@@ -81,6 +81,7 @@ void memory_clear(Context *ctx, void *buf, size_t size);
 bool memory_equal(Context *ctx, const void *buf1, const void *buf2,
                   size_t size);
 
+void memory_copy(Context *ctx, void *buf, const void *src, size_t size);
 
 /**
  * \defgroup array Dynamic array

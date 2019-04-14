@@ -39,3 +39,10 @@ bool memory_equal(Context *ctx, const void *buf1, const void *buf2,
     (void)ctx;
     return !memcmp(buf1, buf2, size);
 }
+
+
+void memory_copy(Context *ctx, void *buf, const void *src, size_t size)
+{
+    (void)ctx;
+    memcpy(buf, src, size);
+}

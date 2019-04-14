@@ -1,0 +1,15 @@
+language: c
+
+before_install:
+  - export CFLAGS="-coverage -O0"
+  - export LDFLAGS="-coverage"
+
+install:
+  - make
+
+script:
+  - make check || exit 1
+  - gcov -o src src/*.c
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash) -X gcov

@@ -102,7 +102,7 @@ void log_default(LogType log, const char *message, void *data)
         struct tm tm;
 
         time(&clock);
-        gmtime_r(&clock, &tm);
+        tm = *gmtime(&clock); // TODO: replace with reentrant version
 
         fprintf(stderr, "%d-%02d-%02d %02d:%02d:%02d [DEBUG] %s\n",
                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,

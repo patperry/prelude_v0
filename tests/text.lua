@@ -118,7 +118,7 @@ assert(not text.decode("\xF4\x90\x80\x80"))
 assert(not text.decode("\xF4\xBF\x80\x80"))
 assert(not text.decode("\xF5\x80\x80\x80"))
 assert(not text.decode("\xFF\x80\x80\x80"))
-
+assert(not text.decode("\xF4\x80\x80\x7F"))
 
 -- valid escaped text
 assert(text.unescape("hello world"))

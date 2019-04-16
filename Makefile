@@ -67,5 +67,5 @@ clean:
 	$(RM) $(ALL_T) $(ALL_O)
 
 .PHONY: check
-check:
+check: $(LUA) tests/all.lua tests/text.lua
 	$(LUA) tests/all.lua

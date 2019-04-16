@@ -170,3 +170,16 @@ assert(text.decode("hello") ~= text.decode("hell_"))
 assert(text.decode("hello") == text.char(0x68, 0x65, 0x6c, 0x6c, 0x6f))
 assert(text.unescape("hello\\nworld") == text.decode("hello\nworld"))
 assert(text.unescape("hello\\nworld") ~= text.decode("hello\\nworld"))
+
+-- encode-decode round trip
+for code=1,0xFFFF,0xFF do -- U+0000..U+FFFF
+  assert(text.codepoint(text.char(code)) == code)
+end
+
+for _, code in pairs({
+    0x10000, 0x10001, 0x3FFFE, 0x3FFFF,     --  U+10000..U+3FFFF
+	0x40000, 0x40001, 0xFFFFE, 0xFFFFF,     --  U+40000..U+FFFFF
+	0x100000, 0x100001, 0x10FFFE, 0x10FFFF  -- U+100000..U+10FFFF
+    }) do
+  assert(text.codepoint(text.char(code)) == code)
+end

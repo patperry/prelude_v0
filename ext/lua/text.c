@@ -41,7 +41,7 @@ static int codepoint(lua_State *L)
     const Text *text = luaL_checkudata(L, 1, "text");
     lua_Integer i = luaL_optinteger(L, 2, 1);
     lua_Integer j = luaL_optinteger(L, 3, i);
-    lua_Integer pos = 1;
+    lua_Integer pos = 0;
     int nret = 0;
 
     if (i < 0 || j < 0) {

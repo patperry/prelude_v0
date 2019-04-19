@@ -11,22 +11,23 @@
 #define ARRAY_GROW 1.618 /* Golden Ratio, (1 + sqrt(5)) / 2 */
 
 
-static Error array_size(Context *ctx, size_t width, int32_t *pcapacity,
-                        int32_t count, int32_t extra);
+static int32_t array_size(Context *ctx, size_t width, int32_t capacity,
+                          int32_t count, int32_t extra, Error *perr);
 
 
-Error array_reserve(Context *ctx, void **pbase, size_t width,
-                    int32_t *pcapacity, int32_t count, int32_t extra)
+void array_reserve(Context *ctx, void **pbase, size_t width,
+                   int32_t *pcapacity, int32_t count, int32_t extra,
+                   Error *perr)
 {
     int32_t old_capacity = *pcapacity;
     if (old_capacity < 0) {
         old_capacity = 0;
     }
 
-    int32_t new_capacity = old_capacity;
-    Error err = array_size(ctx, width, &new_capacity, count, extra);
-    if (err) {
-        return err;
+    int32_t new_capacity = array_size(ctx, width, old_capacity, count, extra,
+                                      perr);
+    if (*perr) {
+        return;
     }
 
     size_t old_size = (size_t)old_capacity * width;
@@ -34,29 +35,29 @@ Error array_reserve(Context *ctx, void **pbase, size_t width,
 
     void *base = memory_realloc(ctx, *pbase, old_size, new_size);
     if (!base) {
-        return context_error(ctx);
+        *perr = context_error(ctx);
+    } else {
+        *pbase = base;
+        *pcapacity = new_capacity;
     }
-
-    *pbase = base;
-    *pcapacity = new_capacity;
-    return ERROR_NONE;
 }
 
 
-Error array_size(Context *ctx, size_t width, int32_t *pcapacity,
-                 int32_t count, int32_t extra)
+int32_t array_size(Context *ctx, size_t width, int32_t capacity,
+                   int32_t count, int32_t extra, Error *perr)
 {
     assert(width > 0);
     assert(count >= 0);
     assert((size_t)count <= SIZE_MAX / width);
 
     if (extra <= 0) {
-        return ERROR_NONE;
+        return capacity;
     }
 
     if (extra > INT32_MAX - count) {
-        return context_panic(ctx, ERROR_OVERFLOW, "required number of elements"
-                             " exceeds maximum (%"PRId32")", INT32_MAX);
+        *perr = context_panic(ctx, ERROR_OVERFLOW, "required number of elements"
+                              " exceeds maximum (%"PRId32")", INT32_MAX);
+        return -1;
     }
 
     int32_t capacity_min = count + extra;
@@ -64,8 +65,6 @@ Error array_size(Context *ctx, size_t width, int32_t *pcapacity,
         return context_panic(ctx, ERROR_OVERFLOW, "required number of elements"
                              " exceeds maximum (%zu)", SIZE_MAX / width);
     }
-
-    int32_t capacity = *pcapacity;
 
     if (capacity < 0) {
         capacity = 0;
@@ -92,8 +91,5 @@ Error array_size(Context *ctx, size_t width, int32_t *pcapacity,
 		}
 	}
 
-    *pcapacity = capacity;
-    return ERROR_NONE;
+    return capacity;
 }
-
-

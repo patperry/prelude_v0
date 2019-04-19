@@ -1,18 +1,18 @@
 #include "prelude.h"
 
 
-Error text_view(Context *ctx, Text *text, TextViewType flags,
-                const uint8_t *bytes, size_t size)
+void text_view(Context *ctx, Text *text, TextViewType flags,
+               const uint8_t *bytes, size_t size, Error *perr)
 {
     memory_clear(ctx, text, sizeof(*text));
 
     if (size > (size_t)INT32_MAX) {
-        return context_panic(ctx, ERROR_OVERFLOW, "text size (%zu bytes)"
-                             " exceeds maximum (%"PRId32" bytes)",
-                             size, INT32_MAX);
+        *perr = context_panic(ctx, ERROR_OVERFLOW, "text size (%zu bytes)"
+                              " exceeds maximum (%"PRId32" bytes)",
+                              size, INT32_MAX);
+        return;
     }
 
-    Error err = ERROR_NONE;
     const uint8_t *ptr = bytes;
     const uint8_t *end = ptr + size;
     bool unescape = false;
@@ -24,13 +24,15 @@ Error text_view(Context *ctx, Text *text, TextViewType flags,
             if (ch == '\\') {
                 unescape = true;
 
-                if ((err = char_scan_escape(ctx, &ptr, end))) {
-                    goto out;
+                ptr = char_scan_escape(ctx, ptr, end, perr);
+                if (*perr) {
+                    return;
                 }
             } else if (ch & 0x80) {
                 ptr--;
-                if ((err = char_scan_utf8(ctx, &ptr, end))) {
-                    goto out;
+                ptr = char_scan_utf8(ctx, ptr, end, perr);
+                if (*perr) {
+                    return;
                 }
             }
         }
@@ -39,20 +41,17 @@ Error text_view(Context *ctx, Text *text, TextViewType flags,
             ch = *ptr++;
             if (ch & 0x80) {
                 ptr--;
-                if ((err = char_scan_utf8(ctx, &ptr, end))) {
-                    goto out;
+                ptr = char_scan_utf8(ctx, ptr, end, perr);
+                if (*perr) {
+                    return;
                 }
             }
         }
     }
 
-out:
-    if (!err) {
-        text->bytes = bytes;
-        text->unescape = (unsigned int)unescape;
-        text->size = size;
-    }
-    return err;
+    text->bytes = bytes;
+    text->unescape = (unsigned int)unescape;
+    text->size = size;
 }
 
 

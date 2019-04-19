@@ -95,8 +95,9 @@ void memory_copy(Context *ctx, void *buf, const void *src, size_t size);
  * @{
  */
 
-Error array_reserve(Context *ctx, void **pbase, size_t width,
-                    int32_t *pcapacity, int32_t count, int32_t extra);
+void array_reserve(Context *ctx, void **pbase, size_t width,
+                   int32_t *pcapacity, int32_t count, int32_t extra,
+                   Error *perr);
 
 /**@}*/
 
@@ -145,16 +146,18 @@ typedef int32_t Char32;
  * Scan over the first code point in a UTF-8 buffer, updating `*pptr` to
  * point past the encoded code point.
  *
- * Returns ERROR_VALUE for invalid UTF-8.
+ * Fails with ERROR_VALUE for invalid UTF-8.
  */
-Error char_scan_utf8(Context *ctx, const uint8_t **pptr, const uint8_t *end);
+const uint8_t *char_scan_utf8(Context *ctx, const uint8_t *ptr,
+                              const uint8_t *end, Error *perr);
 
 /**
  * Scan a JSON-style backslash (\\) escape.
  *
- * Returns ERROR_VALUE for invalid UTF-8 or invalid escape code.
+ * Fails with ERROR_VALUE for invalid UTF-8 or invalid escape code.
  */
-Error char_scan_escape(Context *ctx, const uint8_t **pptr, const uint8_t *end);
+const uint8_t *char_scan_escape(Context *ctx, const uint8_t *ptr,
+                                const uint8_t *end, Error *perr);
 
 /**
  * Decode the first code point from a UTF-8 character buffer, without
@@ -277,8 +280,8 @@ typedef enum {
 	TEXTVIEW_UNESCAPE = (1 << 0)
 } TextViewType;
 
-Error text_view(Context *ctx, Text *text, TextViewType flags,
-                const uint8_t *bytes, size_t size);
+void text_view(Context *ctx, Text *text, TextViewType flags,
+               const uint8_t *bytes, size_t size, Error *perr);
 
 bool text_equal(Context *ctx, const Text *text1, const Text *text2);
 int32_t text_length(Context *ctx, const Text *text);
@@ -333,5 +336,35 @@ typedef struct {
 } TextMap;
 
 /**@}*/
+
+/**
+ * Sockets
+ *
+ * [tutorial]: http://beej.us/guide/bgnet/html/single/bgnet.html
+ *
+ *
+ * HTTP/1.1 messages
+ *
+ * [overview]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Messages
+ * [response-length]: https://stackoverflow.com/a/4824738/6233565
+ */
+
+typedef struct {
+    int32_t timeout_usec;
+} Socket;
+
+void socket_init(Context *ctx, Socket *sock, const char *hostname,
+                 const char *service);
+void socket_deinit(Context *ctx, Socket *sock);
+
+void socket_timeout(Context *ctx, int32_t timeout_usec);
+
+void socket_connect(Context *ctx, Socket *sock);
+void socket_disconnect(Context *ctx, Socket *sock);
+
+void socket_send(Context *ctx, Socket *sock, const uint8_t *bytes,
+                 int32_t size, Error *perr);
+int32_t socket_receive(Context *ctx, Socket *sock, uint8_t *buf,
+                       int32_t capacity, Error *perr);
 
 #endif /* PRELUDE_H */

@@ -357,6 +357,7 @@ void socket_init(Context *ctx, Socket *sock, const char *hostname,
                  const char *service);
 void socket_deinit(Context *ctx, Socket *sock);
 
+/* https://stackoverflow.com/a/2939145/6233565 */
 void socket_timeout(Context *ctx, int32_t timeout_usec);
 
 void socket_connect(Context *ctx, Socket *sock);

@@ -6,6 +6,7 @@
 
 #include "prelude.h"
 
+int luaopen_socket(lua_State *L);
 int luaopen_text(lua_State *L);
 void luaopen_prelude(lua_State *L);
 

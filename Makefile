@@ -28,7 +28,7 @@ LUA_LIB_O =	$(LUASRC)/lauxlib.o $(LUASRC)/lbaselib.o $(LUASRC)/lbitlib.o \
 			$(LUASRC)/lmathlib.o $(LUASRC)/loslib.o $(LUASRC)/lstrlib.o \
 			$(LUASRC)/ltablib.o $(LUASRC)/lutf8lib.o $(LUASRC)/loadlib.o \
 			ext/lua/linit.o
-LUA_EXT_O = ext/lua/lprelude.o ext/lua/text.o
+LUA_EXT_O = ext/lua/lprelude.o ext/lua/socket.o ext/lua/text.o
 LUA_BASE_O = $(LUA_CORE_O) $(LUA_LIB_O) $(LUA_EXT_O)
 LUA = bin/lua
 

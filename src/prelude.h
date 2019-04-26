@@ -340,6 +340,7 @@ typedef struct {
 /**
  * Sockets
  *
+ * [gnu]: https://www.gnu.org/software/libc/manual/html_node/Sockets.html
  * [tutorial]: http://beej.us/guide/bgnet/html/single/bgnet.html
  *
  *
@@ -349,18 +350,47 @@ typedef struct {
  * [response-length]: https://stackoverflow.com/a/4824738/6233565
  */
 
+
+#define SOCKET_PORT_NONE 0
+#define SOCKET_PORT_HTTP 80
+
+typedef enum {
+    SOCKET_FAMILY_NONE = 0,
+    SOCKET_FAMILY_INET,
+    SOCKET_FAMILY_INET6
+} SocketFamilyType;
+
+typedef enum {
+    SOCKET_COMM_NONE = 0,
+    SOCKET_COMM_STREAM,
+    SOCKET_COMM_DGRAM
+} SocketCommType;
+
+typedef struct {
+    SocketFamilyType family;
+    SocketCommType comm;
+    int proto;
+    uint8_t *addr;
+    int addr_length;
+} HostLookup;
+
+void hostlookup_init(Context *ctx, HostLookup *lookup, const char *name,
+                     int port, SocketFamilyType family, SocketCommType comm,
+                     int proto, int flags);
+
 typedef struct {
     int32_t timeout_usec;
 } Socket;
 
-void socket_init(Context *ctx, Socket *sock, const char *hostname,
-                 const char *service);
+
+void socket_init(Context *ctx, Socket *sock, SocketAddrType,
+                 SocketCommType comm);
 void socket_deinit(Context *ctx, Socket *sock);
 
 /* https://stackoverflow.com/a/2939145/6233565 */
 void socket_timeout(Context *ctx, int32_t timeout_usec);
 
-void socket_connect(Context *ctx, Socket *sock);
+void socket_connect(Context *ctx, Socket *sock, const char *hostname, int port);
 void socket_disconnect(Context *ctx, Socket *sock);
 
 void socket_send(Context *ctx, Socket *sock, const uint8_t *bytes,

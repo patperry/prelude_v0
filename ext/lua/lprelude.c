@@ -18,6 +18,7 @@ static const struct luaL_Reg context_m[] = {
 };
 
 static const luaL_Reg module_libs[] = {
+    {"socket", luaopen_socket},
     {"text", luaopen_text},
     {NULL, NULL}
 };

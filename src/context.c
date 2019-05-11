@@ -87,9 +87,10 @@ Error context_panic(Context *ctx, Error error, const char *format, ...)
 }
 
 
-void context_recover(Context *ctx)
+Error context_recover(Context *ctx)
 {
-    ctx->error = 0;
+    ctx->error = ERROR_NONE;
+    return ctx->error;
 }
 
 

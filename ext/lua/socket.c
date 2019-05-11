@@ -6,16 +6,16 @@ static int connect(lua_State *L)
 {
     Context *ctx = lprelude_open(L);
     size_t len;
-    const char *hostname = luaL_checklstring(L, 1, &len);
-    lua_Integer port = luaL_optinteger(L, 2, PORT_NONE);
+    const char *host = luaL_checklstring(L, 1, &len);
+    const char *service = luaL_optstring(L, 2, NULL);
 
     Socket *sock = lua_newuserdata(L, sizeof(*sock));
     memory_clear(ctx, sock, sizeof(*sock));
     luaL_getmetatable(L, "socket");
     lua_setmetatable(L, -2);
 
-    (void)hostname;
-    (void)port;
+    (void)host;
+    (void)service;
     
     lprelude_close(L, ctx);
     return 1;

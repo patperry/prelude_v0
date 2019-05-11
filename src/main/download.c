@@ -2,73 +2,81 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <unistd.h>
-
+#include "prelude.h"
 
 int main(int argc, const char **argv)
 {
     (void)argc;
     (void)argv;
 
-    int err = 0;
-    const char *hostname = "www.unicode.org";
+    Error err = ERROR_NONE;
+
+    const char *host = "www.unicode.org";
+    const char *service = "http";
+    Context ctx;
+    HostLookup look;
+    Socket sock;
+    bool has_sock = false;
+    Task task;
+
+    context_init(&ctx);
+    hostlookup_init(&ctx, &look, host, service, SOCKET_FAMILY_NONE,
+                    SOCKET_COMM_STREAM, SOCKET_PROTO_TCP);
+
+    while (!has_sock && hostlookup_advance(&ctx, &look, &err)) {
+        socket_init(&ctx, &sock, look.family, look.comm, lookup.proto, &err);
+        socket_connect(&ctx, &sock, &look.addr, &task, &err);
+        task_await(&ctx, task, timeout_ms, &err);
+
+        if (err) {
+            socket_deinit(&ctx, &sock);
+            err = context_recover(&ctx);
+        } else {
+            has_sock = true;
+        }
+    }
+
+    if (!has_sock) { // lookup failed or could not connect to an address
+        goto connect_fail;
+    }
+
     // http://www.unicode.org/Public/12.0.0/data/ucd/UnicodeData.txt
     const char *message = 
         "GET /Public/12.0.0/ucd/UnicodeData.txt HTTP/1.1\r\n"
         "Host: www.unicode.org\r\n"
         "\r\n";
 
-    struct addrinfo *res, *res0;
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = PF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    if ((err = getaddrinfo(hostname, "http", &hints, &res0))) {
-        printf("error %s", gai_strerror(err));
-        // error
+    socket_send(&ctx, &sock, message, strlen(message), 0, &task, &err);
+    task_await(&ctx, task, timeout_ms, &err);
+    if (err) {
+        goto send_fail;
     }
-
-    int sockfd = -1;
-    for (res = res0; res; res = res->ai_next) {
-        sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-        if (sockfd < 0) {
-            // socket failed
-            continue;
-        }
-
-        if (connect(sockfd, res->ai_addr, res->ai_addrlen) < 0) {
-            // connect failed
-            close(sockfd);
-            sockfd = -1;
-            continue;
-        }
-
-        printf("success!\n");
-        break; // success
-    }
-
-    send(sockfd, message, strlen(message), 0);
 
     char response[4096];
     memset(response, 0, sizeof(response));
     int total = sizeof(response)-1;
     int received = 0;
     int bytes = 0;
+
     do {
-        bytes = recv(sockfd, response, total, 0);
-        if (bytes < 0)
-            printf("ERROR reading response from socket");
+        socket_receive(&ctx, &sock, response, total, 0, &task, &bytes, &err);
+        task_await(&ctx, task, timeout_ms, &err);
+        if (err) {
+            goto receive_fail;
+        }
+
         printf("%s", response);
         memset(response, 0, sizeof(response));
         printf("bytes = %d\n", bytes);
     } while (bytes > 0);
 
-    freeaddrinfo(res0);
-    shutdown(sockfd, 2); // 0 = stop recv; 1 = stop send; 2 = stop both
-    close(sockfd);
+    socket_disconnect(&ctx, &sock);
 
-    return 0;
+receive_fail:
+send_fail:
+    socket_deinit(&sock);
+connect_fail:
+    hostlookup_deinit(&lookup);
+    context_deinit(&ctx);
+    return err;
 }

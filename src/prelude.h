@@ -23,7 +23,7 @@ typedef enum {
     ERROR_NONE = 0,
     ERROR_MEMORY,
     ERROR_OVERFLOW,
-    ERROR_VALUE,
+    ERROR_VALUE
 } Error;
 
 typedef enum {
@@ -55,7 +55,7 @@ void context_deinit(Context *ctx);
 
 Error context_panic(Context *ctx, Error error, const char *format, ...)
     __attribute__ ((format (printf, 3, 4)));
-void context_recover(Context *ctx);
+Error context_recover(Context *ctx);
 Error context_error(Context *ctx);
 const char *context_message(Context *ctx);
 
@@ -350,52 +350,125 @@ typedef struct {
  * [response-length]: https://stackoverflow.com/a/4824738/6233565
  */
 
-
-#define SOCKET_PORT_NONE 0
-#define SOCKET_PORT_HTTP 80
-
 typedef enum {
-    SOCKET_FAMILY_NONE = 0,
-    SOCKET_FAMILY_INET,
-    SOCKET_FAMILY_INET6
+    SOCKET_FAMILY_NONE = 0, /* AF_UNSPEC / PF_UNSPEC */
+    SOCKET_FAMILY_INET,     /* AF_INET / PF_INET */
+    SOCKET_FAMILY_INET6,    /* AF_INET6 /  PF_INET6 */
+    SOCKET_FAMILY_PACKET    /* AF_PACKET / PF_INET */
 } SocketFamilyType;
 
 typedef enum {
     SOCKET_COMM_NONE = 0,
-    SOCKET_COMM_STREAM,
-    SOCKET_COMM_DGRAM
+    SOCKET_COMM_STREAM,     /* SOCK_STREAM */
+    SOCKET_COMM_DGRAM,      /* SOCK_DGRAM */
+    SOCKET_COMM_RAW         /* SOCK_RAW */
 } SocketCommType;
 
+typedef enum {
+    SOCKET_PROTO_NONE = 0,  /* IPPROTO_IP */
+    SOCKET_PROTO_TCP,       /* IPPROTO_TCP */
+    SOCKET_PROTO_UDP,       /* IPPROTO_UDP */
+    SOCKET_PROTO_RAW        /* IPPROTO_RAW */
+} SocketProtoType;
+
+typedef enum {
+    HOSTLOOKUP_USABLE = 0,
+        /* AI_HOSTLOOKUP_ADDRCONFIG | AI_V4MAPPED */
+
+    HOSTLOOKUP_NUMERICHOST = (1 << 0),
+        /* host is a numeric string; no name lookup */
+    HOSTLOOKUP_NUMERICSERV = (1 << 1),
+        /* service is a numeric string (port number); no name lookup */
+
+    HOSTLOOKUP_PASSIVE = (1 << 2),
+        /* passed with NULL host to get a bind address */
+
+    HOSTLOOKUP_ALL = (1 << 3),
+        /* include v4 addresses when v6 requested and V4MAPPED is set */
+    HOSTLOOKUP_NOADDRCONFIG = (1 << 4),
+        /* include unsupported families */
+    HOSTLOOKUP_NOCANONNAME = (1 << 5),
+        /* do not set the canonical name `canonname` in the result */
+    HOSTLOOKUP_NOV4MAPPED = (1 << 6)
+        /* do not map IPv4 to IPv6 */
+} HostLookupFlags;
+
+
 typedef struct {
+    void *address;
+    int address_len;
+} HostAddress;
+
+typedef struct {
+    void *addrinfo; /* `struct addrinfo` from `getaddrinfo` */
+    int addrinfo_error; /* gai_strerror */
+
     SocketFamilyType family;
     SocketCommType comm;
-    int proto;
-    uint8_t *addr;
-    int addr_length;
+    SocketProtoType proto;
+    HostAddress addr;
+    const char *canonname;
 } HostLookup;
 
-void hostlookup_init(Context *ctx, HostLookup *lookup, const char *name,
-                     int port, SocketFamilyType family, SocketCommType comm,
-                     int proto, int flags);
+void hostlookup_init(Context *ctx, HostLookup *look, const char *host,
+                     const char *service, SocketFamilyType family,
+                     SocketCommType comm, SocketProtoType proto,
+                     HostLookupFlags flags);
+
+/* All arguments are optional, but you cannot leave both `host` and `service` 
+ * unspecified.
+ *
+ * # NULL host
+ *
+ * With `HOSTLOOKUP_PASSIVE`, use the wildcard address (INADDR_ANY), used
+ * to accept connections on any of the system's network addresses.
+ *
+ * Otherwise, use the loopback interface address (INADDR_LOOPBACK), used for
+ * communication with peers on the same host.
+ *
+ *
+ * # NULL service
+ *
+ * Leaves the port number unspecified in the returned address (so that `bind`
+ * can assign the port later).
+ */
+
+bool hostlookup_advance(Context *ctx, HostLookup *look, Error *perr);
+void hostlookup_deinit(Context *ctx, HostLookup *look);
 
 typedef struct {
-    int32_t timeout_usec;
+    int fd;
 } Socket;
 
 
-void socket_init(Context *ctx, Socket *sock, SocketAddrType,
-                 SocketCommType comm);
+void socket_init(Context *ctx, Socket *sock, SocketFamilyType family,
+                 SocketCommType comm, SocketProtoType proto);
 void socket_deinit(Context *ctx, Socket *sock);
 
 /* https://stackoverflow.com/a/2939145/6233565 */
-void socket_timeout(Context *ctx, int32_t timeout_usec);
 
-void socket_connect(Context *ctx, Socket *sock, const char *hostname, int port);
+void socket_connect(Context *ctx, Socket *sock, const HostAddress *addr,
+                    Error *perr);
 void socket_disconnect(Context *ctx, Socket *sock);
 
+typedef enum {
+    SOCKET_SEND_NORMAL = 0,
+    SOCKET_SEND_OOB = (1 << 0),
+    SOCKET_SEND_DONTROUTE = (1 << 1)
+} SocketSendFlags;
+
 void socket_send(Context *ctx, Socket *sock, const uint8_t *bytes,
-                 int32_t size, Error *perr);
-int32_t socket_receive(Context *ctx, Socket *sock, uint8_t *buf,
-                       int32_t capacity, Error *perr);
+                 int32_t size, SocketSendFlags flags, Error *perr);
+
+typedef enum {
+    SOCKET_RECEIVE_NORMAL = 0,
+    SOCKET_RECEIVE_OOB = (1 << 0),
+    SOCKET_RECEIVE_PEEK = (1 << 1),
+    SOCKET_RECEIVE_WAITALL = (1 << 2)
+} SocketReceiveFlags;
+
+void socket_receive(Context *ctx, Socket *sock, uint8_t *buf,
+                    int32_t capacity, SocketReceiveFlags flags,
+                    Task *ptask, int32_t *pcount, Error *perr);
 
 #endif /* PRELUDE_H */

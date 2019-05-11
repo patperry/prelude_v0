@@ -1,9 +1,9 @@
 
-hostname = "www.unicode.org"
+host= "www.unicode.org"
 resource = "/Public/12.0.0/ucd/UnicodeData.txt"
-port = 80 -- http
+service = "http"
 
-sock = socket.connect(hostname, port)
+sock = socket.connect(host, service)
 sock:send(
   "GET " .. resource .. " HTTP/1.1\r\n"
   .. "Host: " .. hostname .. "\r\n"

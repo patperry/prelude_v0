@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -7,14 +8,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <fcntl.h>
+#include <netdb.h>
 #include <poll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netdb.h>
-
-#include <arpa/inet.h>
-
 #include <time.h>
+#include <unistd.h>
+
 
 // https://people.eecs.berkeley.edu/~sangjin/2012/12/21/epoll-vs-kqueue.html
 
@@ -27,15 +28,18 @@ typedef enum {
 } Error;
 
 
-Error error_number(int no)
+int error_code(int errnum)
 {
-    switch (no) {
+    switch (errnum) {
+    case 0:
+        return 0;
     case ENOMEM:
         return ERROR_MEMORY;
     default:
         return ERROR_OS;
     }
 }
+
 
 int64_t clock_usec(clockid_t clock_id)
 {
@@ -72,6 +76,13 @@ const char *context_message(Context *ctx)
     return (ctx->_active) ? ctx->_buffer1 : ctx->_buffer0;
 }
 
+void context_recover(Context *ctx)
+{
+    ctx->err = 0;
+    ctx->_buffer0[0] = '\0';
+    ctx->_buffer1[0] = '\0';
+}
+
 Error context_panic(Context *ctx, Error err, const char *format, ...)
 {
     va_list args;
@@ -83,6 +94,21 @@ Error context_panic(Context *ctx, Error err, const char *format, ...)
     ctx->err = err;
     return err;
 }
+
+
+Error context_code(Context *ctx, int errnum)
+{
+    int err = error_code(errnum);
+
+    if (err) {
+        context_panic(ctx, err, strerror(errnum));
+    } else {
+        context_recover(ctx);
+    }
+
+    return err;
+}
+
 
 typedef enum {
     IO_READ = 1 << 0,
@@ -162,7 +188,8 @@ void task_await_io(Context *ctx, TaskIO *task, Error *perr)
 
     if (poll(fds, 1, -1) < 0) {
         // TODO: message
-        *perr = error_number(errno);
+        *perr = context_code(ctx, errno);
+        errno = 0;
     }
 }
 
@@ -170,7 +197,8 @@ void task_await_io(Context *ctx, TaskIO *task, Error *perr)
 void task_await_timer(Context *ctx, TaskTimer *task, Error *perr)
 {
     if (poll(NULL, 0, task->timeout_millis) < 0) {
-        *perr = error_number(errno);
+        *perr = context_code(ctx, errno);
+        errno = 0;
     }
 }
 
@@ -235,9 +263,50 @@ void getaddrinfo_deinit(Context *ctx, GetAddrInfo *req)
 }
 
 
+typedef struct {
+    Task task;
+} SockConnect;
+
+
+bool sockconnect_advance(Context *ctx, Task *task, Error *perr)
+{
+    SockConnect *req = (SockConnect *)task;
+    return false;
+}
+
+
+void sockconnect_init(Context *ctx, SockConnect *req, int sockfd,
+                      const struct sockaddr *address, socklen_t address_len)
+{
+    memset(req, 0, sizeof(*req));
+    req->task._advance = sockconnect_advance;
+}
+
+void sockconnect_deinit(Context *ctx, SockConnect *conn)
+{
+    (void)ctx;
+    (void)conn;
+}
+
+typedef struct {
+    Task task;
+} SockSend;
+
+void socksend_init(Context *ctx, SockSend *req, int sockfd,
+                   const void *buffer, size_t length, int flags)
+{
+}
+
+void socksend_deinit(Context *ctx, SockSend *req)
+{
+}
+
 typedef enum {
     HTTPGET_INIT = 0,
-    HTTPGET_GETADDR
+    HTTPGET_GETADDR,
+    HTTPGET_OPEN,
+    HTTPGET_CONNECT,
+    HTTPGET_SEND
 } HttpGetState;
 
 typedef struct {
@@ -245,32 +314,43 @@ typedef struct {
     HttpGetState state;
     const char *host;
     const char *resource;
+
+    GetAddrInfo getaddr;
+    const struct addrinfo *addrinfo;
+    int sockfd;
+    SockConnect conn;
+    SockSend send;
 } HttpGet;
 
 
 bool httpget_advance(Context *ctx, Task *task, Error *perr)
 {
-    HttpGet *request = (HttpGet *)task;
+    HttpGet *req = (HttpGet *)task;
 
-    switch (request->state) {
+    switch (req->state) {
     case HTTPGET_INIT:
         break;
     case HTTPGET_GETADDR:
         goto getaddr;
+    case HTTPGET_OPEN:
+        goto open;
+    case HTTPGET_CONNECT:
+        goto connect;
+    case HTTPGET_SEND:
+        goto send;
     }
 
     struct addrinfo hints = {0};
     hints.ai_flags = PF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
-    GetAddrInfo getaddr;
 
-    getaddrinfo_init(ctx, &getaddr, request->host, "http", &hints);
-    request->state = HTTPGET_GETADDR;
+    getaddrinfo_init(ctx, &req->getaddr, req->host, "http", &hints);
+    req->state = HTTPGET_GETADDR;
 
 getaddr:
-    if (task_advance(ctx, &getaddr.task, perr)) {
-        task->current = getaddr.task.current;
+    if (task_advance(ctx, &req->getaddr.task, perr)) {
+        task->current = req->getaddr.task.current;
         return true;
     }
 
@@ -278,21 +358,101 @@ getaddr:
         context_panic(ctx, *perr,
             "failed getting host address information: %s",
             context_message(ctx));
+        return false;
     }
+
+    req->addrinfo = req->getaddr.result;
+    req->state = HTTPGET_OPEN;
+
+open:
+    assert(req->addrinfo);
+    req->sockfd = -1;
+
+    while (req->sockfd < 0 && req->addrinfo) {
+        const struct addrinfo *ai = req->addrinfo;
+
+        req->sockfd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (req->sockfd >= 0)
+            break;
+
+        int flags = fcntl(req->sockfd, F_GETFL, 0);
+        if (flags >= 0) {
+            fcntl(req->sockfd, F_SETFL, flags | O_NONBLOCK); // ignore error
+        }
+
+        req->addrinfo = req->addrinfo->ai_next;
+    }
+
+    if (req->sockfd < 0) {
+        *perr = context_panic(ctx, error_code(errno),
+            "failed opening socket: %s", strerror(errno));
+        errno = 0;
+    }
+
+    sockconnect_init(ctx, &req->conn, req->sockfd, req->addrinfo->ai_addr,
+                     req->addrinfo->ai_addrlen);
+    req->state = HTTPGET_CONNECT;
+
+connect:
+    if (task_advance(ctx, &req->conn.task, perr)) {
+        task->current = req->conn.task.current;
+        return true;
+    }
+
+    if (*perr) {
+        req->addrinfo = req->addrinfo->ai_next;
+        if (req->addrinfo) {
+            sockconnect_deinit(ctx, &req->conn);
+            close(req->sockfd);
+            req->state = HTTPGET_OPEN;
+            goto open;
+        }
+
+        context_panic(ctx, *perr,
+            "failed connecting to host: %s",
+            context_message(ctx));
+        return false;
+    }
+
+    req->state = HTTPGET_SEND;
+
+    socksend_init(ctx, &req->send, req->sockfd, NULL, 0, 0);
+send:
 
     task->current.type = TASK_NONE;
     return false;
 }
 
 
-void httpget_init(Context *ctx, HttpGet *request, const char *host,
+void httpget_init(Context *ctx, HttpGet *req, const char *host,
                   const char *resource)
 {
-    request->state = HTTPGET_INIT;
-    request->host = host;
-    request->resource = resource;
-    request->task.current.type = TASK_NONE;
-    request->task._advance = httpget_advance;
+    req->state = HTTPGET_INIT;
+    req->host = host;
+    req->resource = resource;
+    req->task.current.type = TASK_NONE;
+    req->task._advance = httpget_advance;
+}
+
+void httpget_deinit(Context *ctx, HttpGet *req)
+{
+    switch (req->state) {
+    case HTTPGET_SEND:
+        socksend_deinit(ctx, &req->send);
+
+    case HTTPGET_CONNECT:
+        sockconnect_deinit(ctx, &req->conn);
+
+    case HTTPGET_OPEN:
+        if (req->sockfd >= 0)
+            close(req->sockfd);
+
+    case HTTPGET_GETADDR:
+        getaddrinfo_deinit(ctx, &req->getaddr);
+
+    case HTTPGET_INIT:
+        break;
+    }
 }
 
 
@@ -308,14 +468,16 @@ int main(int argc, const char **argv)
     Context ctx;
     context_init(&ctx);
 
-    HttpGet request;
-    httpget_init(&ctx, &request, "www.unicode.org",
+    HttpGet req;
+    httpget_init(&ctx, &req, "www.unicode.org",
                  "/Public/12.0.0/ucd/UnicodeData.txt");
-    task_await(&ctx, &request.task, &err);
+    task_await(&ctx, &req.task, &err);
     if (err) {
         fprintf(stderr, "error: %s", context_message(&ctx));
         return EXIT_FAILURE;
     }
+
+    httpget_deinit(&ctx, &req);
 
     return err ? EXIT_FAILURE : EXIT_SUCCESS;
 

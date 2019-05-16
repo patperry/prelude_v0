@@ -118,25 +118,25 @@ typedef enum {
 typedef struct {
     int fd;
     IOFlag flags;
-} TaskIO;
+} BlockIO;
 
 typedef struct {
-    int timeout_millis;
-} TaskTimer;
+    int millis;
+} BlockTimer;
 
 typedef enum {
-    TASK_NONE = 0,
-    TASK_IO,
-    TASK_TIMER
-} TaskType;
+    BLOCK_NONE = 0,
+    BLOCK_IO,
+    BLOCK_TIMER
+} BlockType;
 
 typedef struct {
     union {
-        TaskIO io;
-        TaskTimer timer;
+        BlockIO io;
+        BlockTimer timer;
     } job;
-    TaskType type;
-} TaskCurrent;
+    BlockType type;
+} Block;
 
 /*
  * epoll
@@ -161,42 +161,41 @@ typedef struct {
 
 
 typedef struct Task {
-    TaskCurrent current;
-    bool (*_advance)(Context *ctx, struct Task *task, Error *perr);
+    Block block;
+    bool (*_blocked)(Context *ctx, struct Task *task, Error *perr);
 } Task;
 
 
-bool task_advance(Context *ctx, Task *task, Error *perr)
+bool task_blocked(Context *ctx, Task *task, Error *perr)
 {
-    return (task->_advance)(ctx, task, perr);
+    return (task->_blocked)(ctx, task, perr);
 }
 
 
-void task_await_io(Context *ctx, TaskIO *task, Error *perr)
+void await_io(Context *ctx, BlockIO *block, Error *perr)
 {
     struct pollfd fds[1];
-    fds[0].fd = task->fd;
+    fds[0].fd = block->fd;
     fds[0].events = 0;
 
-    if (task->flags & IO_READ) {
+    if (block->flags & IO_READ) {
         fds[0].events |= POLLIN | POLLPRI;
     }
-    if (task->flags & IO_WRITE) {
+    if (block->flags & IO_WRITE) {
         fds[0].events |= POLLOUT | POLLWRBAND;
     }
     fds[0].revents = 0;
 
     if (poll(fds, 1, -1) < 0) {
-        // TODO: message
         *perr = context_code(ctx, errno);
         errno = 0;
     }
 }
 
 
-void task_await_timer(Context *ctx, TaskTimer *task, Error *perr)
+void await_timer(Context *ctx, BlockTimer *block, Error *perr)
 {
-    if (poll(NULL, 0, task->timeout_millis) < 0) {
+    if (poll(NULL, 0, block->millis) < 0) {
         *perr = context_code(ctx, errno);
         errno = 0;
     }
@@ -205,15 +204,15 @@ void task_await_timer(Context *ctx, TaskTimer *task, Error *perr)
 
 void task_await(Context *ctx, Task *task, Error *perr)
 {
-    while (task_advance(ctx, task, perr)) {
-        switch (task->current.type) {
-        case TASK_NONE:
+    while (task_blocked(ctx, task, perr)) {
+        switch (task->block.type) {
+        case BLOCK_NONE:
             break;
-        case TASK_IO:
-            task_await_io(ctx, &task->current.job.io, perr);
+        case BLOCK_IO:
+            await_io(ctx, &task->block.job.io, perr);
             break;
-        case TASK_TIMER:
-            task_await_timer(ctx, &task->current.job.timer, perr);
+        case BLOCK_TIMER:
+            await_timer(ctx, &task->block.job.timer, perr);
             break;
         }
     }
@@ -230,7 +229,7 @@ typedef struct {
 } GetAddrInfo;
 
 
-bool getaddrinfo_advance(Context *ctx, Task *task, Error *perr)
+bool getaddrinfo_blocked(Context *ctx, Task *task, Error *perr)
 {
     GetAddrInfo *req = (GetAddrInfo *)task;
     int err = getaddrinfo(req->node, req->service, req->hints, &req->result);
@@ -248,7 +247,7 @@ void getaddrinfo_init(Context *ctx, GetAddrInfo *req, const char *node,
                       const char *service, const struct addrinfo *hints)
 {
     memset(req, 0, sizeof(*req));
-    req->task._advance = getaddrinfo_advance;
+    req->task._blocked = getaddrinfo_blocked;
     req->node = node;
     req->service = service;
     req->hints = hints;
@@ -268,7 +267,7 @@ typedef struct {
 } SockConnect;
 
 
-bool sockconnect_advance(Context *ctx, Task *task, Error *perr)
+bool sockconnect_blocked(Context *ctx, Task *task, Error *perr)
 {
     SockConnect *req = (SockConnect *)task;
     return false;
@@ -279,7 +278,7 @@ void sockconnect_init(Context *ctx, SockConnect *req, int sockfd,
                       const struct sockaddr *address, socklen_t address_len)
 {
     memset(req, 0, sizeof(*req));
-    req->task._advance = sockconnect_advance;
+    req->task._blocked = sockconnect_blocked;
 }
 
 void sockconnect_deinit(Context *ctx, SockConnect *conn)
@@ -323,7 +322,7 @@ typedef struct {
 } HttpGet;
 
 
-bool httpget_advance(Context *ctx, Task *task, Error *perr)
+bool httpget_blocked(Context *ctx, Task *task, Error *perr)
 {
     HttpGet *req = (HttpGet *)task;
 
@@ -349,8 +348,8 @@ bool httpget_advance(Context *ctx, Task *task, Error *perr)
     req->state = HTTPGET_GETADDR;
 
 getaddr:
-    if (task_advance(ctx, &req->getaddr.task, perr)) {
-        task->current = req->getaddr.task.current;
+    if (task_blocked(ctx, &req->getaddr.task, perr)) {
+        task->block = req->getaddr.task.block;
         return true;
     }
 
@@ -394,8 +393,8 @@ open:
     req->state = HTTPGET_CONNECT;
 
 connect:
-    if (task_advance(ctx, &req->conn.task, perr)) {
-        task->current = req->conn.task.current;
+    if (task_blocked(ctx, &req->conn.task, perr)) {
+        task->block = req->conn.task.block;
         return true;
     }
 
@@ -414,12 +413,28 @@ connect:
         return false;
     }
 
+    const char *message =
+        "GET /Public/12.0.0/ucd/UnicodeData.txt HTTP/1.1\r\n"
+        "Host: www.unicode.org\r\n"
+        "\r\n";
+
+    socksend_init(ctx, &req->send, req->sockfd, message,  strlen(message), 0);
     req->state = HTTPGET_SEND;
 
-    socksend_init(ctx, &req->send, req->sockfd, NULL, 0, 0);
 send:
+    if (task_blocked(ctx, &req->send.task, perr)) {
+        task->block = req->send.task.block;
+        return true;
+    }
 
-    task->current.type = TASK_NONE;
+    if (*perr) {
+        context_panic(ctx, *perr,
+            "failed sending to host: %s",
+            context_message(ctx));
+        return false;
+    }
+
+    task->block.type = BLOCK_NONE;
     return false;
 }
 
@@ -430,8 +445,8 @@ void httpget_init(Context *ctx, HttpGet *req, const char *host,
     req->state = HTTPGET_INIT;
     req->host = host;
     req->resource = resource;
-    req->task.current.type = TASK_NONE;
-    req->task._advance = httpget_advance;
+    req->task.block.type = BLOCK_NONE;
+    req->task._blocked = httpget_blocked;
 }
 
 void httpget_deinit(Context *ctx, HttpGet *req)

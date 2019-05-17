@@ -339,8 +339,13 @@ typedef struct {
 bool socksend_blocked(Context *ctx, Task *task, Error *perr)
 {
     SockSend *req = (SockSend *)task;
-    const void *buffer = req->buffer + req->nsend;
+    const void *buffer = (const char *)req->buffer + req->nsend;
     size_t length = req->length - req->nsend;
+
+    if (length == 0) {
+        return false;
+    }
+
     ssize_t nsend = send(req->sockfd, buffer, length, req->flags);
 
     if (nsend < 0) {
@@ -376,6 +381,7 @@ void socksend_init(Context *ctx, SockSend *req, int sockfd,
     req->buffer = buffer;
     req->length = length;
     req->flags = flags;
+    req->nsend = 0;
 }
 
 void socksend_deinit(Context *ctx, SockSend *req)
@@ -384,12 +390,86 @@ void socksend_deinit(Context *ctx, SockSend *req)
     (void)req;
 }
 
+typedef struct {
+    Task task;
+    int sockfd;
+    void *buffer;
+    size_t length;
+    int flags;
+    size_t nrecv;
+} SockRecv;
+
+
+bool sockrecv_blocked(Context *ctx, Task *task, Error *perr)
+{
+    SockRecv *req = (SockRecv *)task;
+    void *buffer = (char *)req->buffer + req->nrecv;
+    size_t length = req->length - req->nrecv;
+
+    if (length == 0) {
+        return false;
+    }
+
+    ssize_t nrecv = recv(req->sockfd, buffer, length, req->flags);
+
+    if (nrecv < 0) {
+        int status = errno;
+        errno = 0;
+        if (status == EAGAIN || status == EWOULDBLOCK) {
+            req->task.block.type = BLOCK_IO;
+            req->task.block.job.io.fd = req->sockfd;
+            req->task.block.job.io.flags = IO_READ;
+            return true;
+        } else {
+            *perr = context_code(ctx, status);
+        }
+    } else {
+        req->nrecv += (size_t)nrecv;
+        if (req->nrecv > 0 && req->nrecv < req->length) {
+            return true;
+        }
+    }
+
+    req->task.block.type = BLOCK_NONE;
+    return false;
+}
+
+
+void sockrecv_init(Context *ctx, SockRecv *req, int sockfd,
+                   void *buffer, size_t length, int flags)
+{
+    (void)ctx;
+    memset(req, 0, sizeof(*req));
+    req->task._blocked = sockrecv_blocked;
+    req->sockfd = sockfd;
+    req->buffer = buffer;
+    req->length = length;
+    req->flags = flags;
+    req->nrecv = 0;
+}
+
+
+void sockrecv_deinit(Context *ctx, SockRecv *req)
+{
+    (void)ctx;
+    (void)req;
+}
+
+
+void sockrecv_clear(Context *ctx, SockRecv *req)
+{
+    (void)ctx;
+    req->nrecv = 0;
+}
+
+
 typedef enum {
     HTTPGET_INIT = 0,
     HTTPGET_GETADDR,
     HTTPGET_OPEN,
     HTTPGET_CONNECT,
-    HTTPGET_SEND
+    HTTPGET_SEND,
+    HTTPGET_RECV
 } HttpGetState;
 
 typedef struct {
@@ -403,6 +483,9 @@ typedef struct {
     int sockfd;
     SockConnect conn;
     SockSend send;
+    SockRecv recv;
+
+    char buffer[4096];
 } HttpGet;
 
 
@@ -421,6 +504,8 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
         goto connect;
     case HTTPGET_SEND:
         goto send;
+    case HTTPGET_RECV:
+        goto recv;
     }
 
     struct addrinfo hints = {0};
@@ -504,12 +589,11 @@ connect:
         return false;
     }
 
-    const char *message =
-        "GET /Public/12.0.0/ucd/UnicodeData.txt HTTP/1.1\r\n"
-        "Host: www.unicode.org\r\n"
-        "\r\n";
+    sprintf(req->buffer, "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n",
+            req->resource, req->host);
 
-    socksend_init(ctx, &req->send, req->sockfd, message,  strlen(message), 0);
+    socksend_init(ctx, &req->send, req->sockfd, req->buffer,
+                  strlen(req->buffer), 0);
     req->state = HTTPGET_SEND;
 
     printf("connect finished\n");
@@ -528,8 +612,35 @@ send:
         return false;
     }
 
-    printf("send finished\n");
+    sockrecv_init(ctx, &req->recv, req->sockfd, req->buffer,
+                  sizeof(req->buffer), 0);
+    req->state = HTTPGET_RECV;
 
+    printf("send finished\n");
+recv:
+    printf("recv started\n");
+
+    if (task_blocked(ctx, &req->recv.task, perr)) {
+        task->block = req->recv.task.block;
+        if (req->recv.nrecv > 0) {
+            printf("read %d bytes:\n", (int)req->recv.nrecv);
+            printf("----------------------------------------\n");
+            printf("%.*s", (int)req->recv.nrecv, (char *)req->buffer);
+            printf("\n----------------------------------------\n");
+
+            sockrecv_clear(ctx, &req->recv);
+        }
+        return true;
+    }
+
+    if (*perr) {
+        context_panic(ctx, *perr,
+            "failed receiving from host: %s",
+            context_message(ctx));
+        return false;
+    }
+
+    printf("recv finished\n");
     task->block.type = BLOCK_NONE;
     return false;
 }
@@ -547,9 +658,13 @@ void httpget_init(Context *ctx, HttpGet *req, const char *host,
     req->task._blocked = httpget_blocked;
 }
 
+
 void httpget_deinit(Context *ctx, HttpGet *req)
 {
     switch (req->state) {
+    case HTTPGET_RECV:
+        sockrecv_deinit(ctx, &req->recv);
+
     case HTTPGET_SEND:
         socksend_deinit(ctx, &req->send);
 

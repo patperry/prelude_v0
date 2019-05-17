@@ -463,14 +463,52 @@ void sockrecv_clear(Context *ctx, SockRecv *req)
 }
 
 
+typedef struct {
+    Task task;
+    int sockfd;
+    int how;
+} SockShutdown;
+
+
+bool sockshutdown_blocked(Context *ctx, Task *task, Error *perr)
+{
+    SockShutdown *req = (SockShutdown *)task;
+    if (shutdown(req->sockfd, req->how) < 0) {
+        int status = errno;
+        errno = 0;
+        *perr = context_code(ctx, status);
+    }
+    return false;
+}
+
+
+void sockshutdown_init(Context *ctx, SockShutdown *req, int sockfd, int how)
+{
+    (void)ctx;
+    memset(req, 0, sizeof(*req));
+    req->task._blocked = sockshutdown_blocked;
+    req->sockfd = sockfd;
+    req->how = how;
+}
+
+
+void sockshutdown_deinit(Context *ctx, SockShutdown *req)
+{
+    (void)ctx;
+    (void)req;
+}
+
+
 typedef enum {
     HTTPGET_INIT = 0,
     HTTPGET_GETADDR,
     HTTPGET_OPEN,
     HTTPGET_CONNECT,
     HTTPGET_SEND,
-    HTTPGET_RECV
+    HTTPGET_RECV,
+    HTTPGET_SHUTDOWN
 } HttpGetState;
+
 
 typedef struct {
     Task task;
@@ -484,6 +522,7 @@ typedef struct {
     SockConnect conn;
     SockSend send;
     SockRecv recv;
+    SockShutdown shutdown;
 
     char buffer[4096];
 } HttpGet;
@@ -495,7 +534,7 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
 
     switch (req->state) {
     case HTTPGET_INIT:
-        break;
+        goto init;
     case HTTPGET_GETADDR:
         goto getaddr;
     case HTTPGET_OPEN:
@@ -506,15 +545,20 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
         goto send;
     case HTTPGET_RECV:
         goto recv;
+    case HTTPGET_SHUTDOWN:
+        goto shutdown;
     }
 
-    struct addrinfo hints = {0};
-    hints.ai_flags = PF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
+init:
+    {
+        struct addrinfo hints = {0};
+        hints.ai_flags = PF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_protocol = IPPROTO_TCP;
 
-    getaddrinfo_init(ctx, &req->getaddr, req->host, "http", &hints);
-    req->state = HTTPGET_GETADDR;
+        getaddrinfo_init(ctx, &req->getaddr, req->host, "http", &hints);
+        req->state = HTTPGET_GETADDR;
+    }
 
 getaddr:
     printf("getaddr started\n");
@@ -640,7 +684,25 @@ recv:
         return false;
     }
 
+    sockshutdown_init(ctx, &req->shutdown, req->sockfd, SHUT_RDWR);
+    req->state = HTTPGET_SHUTDOWN;
+
     printf("recv finished\n");
+shutdown:
+    printf("shutdown started\n");
+    if (task_blocked(ctx, &req->shutdown.task, perr)) {
+        task->block = req->shutdown.task.block;
+        return true;
+    }
+
+    if (*perr) {
+        context_panic(ctx, *perr,
+            "failed shutting down connection to host: %s",
+            context_message(ctx));
+        return false;
+    }
+
+    printf("shutdown finished\n");
     task->block.type = BLOCK_NONE;
     return false;
 }
@@ -662,6 +724,9 @@ void httpget_init(Context *ctx, HttpGet *req, const char *host,
 void httpget_deinit(Context *ctx, HttpGet *req)
 {
     switch (req->state) {
+    case HTTPGET_SHUTDOWN:
+        sockshutdown_deinit(ctx, &req->shutdown);
+
     case HTTPGET_RECV:
         sockrecv_deinit(ctx, &req->recv);
 

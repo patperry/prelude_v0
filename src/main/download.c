@@ -180,8 +180,6 @@ static void await_io(Context *ctx, BlockIO *block, Error *perr)
     fds[0].fd = block->fd;
     fds[0].events = 0;
 
-    printf("calling poll...\n");
-
     if (block->flags & IO_READ) {
         fds[0].events |= POLLIN;
     }
@@ -192,13 +190,11 @@ static void await_io(Context *ctx, BlockIO *block, Error *perr)
 
     assert(!errno);
     if (poll(fds, 1, -1) < 0) {
-        printf("failure :(\n");
         *perr = context_code(ctx, errno);
         errno = 0;
     }
 
     assert(!errno);
-    printf("success!\n");
 }
 
 
@@ -322,7 +318,6 @@ bool sockconnect_blocked(Context *ctx, Task *task, Error *perr)
 
     SockConnect *req = (SockConnect *)task;
 
-    printf("calling connect\n");
     if (connect(req->sockfd, req->address, req->address_len) < 0) {
         int status = errno;
         errno = 0;
@@ -559,7 +554,6 @@ typedef enum {
     HTTPGET_OPEN,
     HTTPGET_CONNECT,
     HTTPGET_SEND,
-    HTTPGET_RECV,
     HTTPGET_STATUS,
     HTTPGET_HEADER,
     HTTPGET_BODY,
@@ -567,6 +561,10 @@ typedef enum {
     HTTPGET_EXIT
 } HttpGetState;
 
+typedef struct {
+    const char *key;
+    const char *value;
+} HttpHeader;
 
 typedef struct {
     Task task;
@@ -583,16 +581,15 @@ typedef struct {
     SockShutdown shutdown;
 
     const char *status;
+    size_t status_len;
+
+    HttpHeader *headers;
+    size_t header_count;
+    size_t header_capacity;
 
     char *buffer;
     size_t buffer_len;
     size_t data_len;
-
-    const char *content;
-    struct {
-        const char *key;
-        const char *value;
-    } header;
 } HttpGet;
 
 
@@ -615,6 +612,9 @@ static void httpget_grow(Context *ctx, HttpGet *req, Error *perr)
 
 bool httpget_blocked(Context *ctx, Task *task, Error *perr)
 {
+    struct addrinfo hints;
+    char *end;
+
     if (*perr)
         return false;
 
@@ -631,8 +631,6 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
         goto connect;
     case HTTPGET_SEND:
         goto send;
-    case HTTPGET_RECV:
-        goto recv;
     case HTTPGET_STATUS:
         goto status;
     case HTTPGET_HEADER:
@@ -646,19 +644,15 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
     }
 
 init:
-    {
-        struct addrinfo hints = {0};
-        hints.ai_flags = PF_UNSPEC;
-        hints.ai_socktype = SOCK_STREAM;
-        hints.ai_protocol = IPPROTO_TCP;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_flags = PF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    getaddrinfo_init(ctx, &req->getaddr, req->host, "http", &hints);
 
-        getaddrinfo_init(ctx, &req->getaddr, req->host, "http", &hints);
-        req->state = HTTPGET_GETADDR;
-    }
-
-getaddr:
     printf("getaddr started\n");
-
+    req->state = HTTPGET_GETADDR;
+getaddr:
     if (task_blocked(ctx, &req->getaddr.task, perr)) {
         task->block = req->getaddr.task.block;
         return true;
@@ -672,12 +666,11 @@ getaddr:
     }
 
     req->addrinfo = req->getaddr.result;
-    req->state = HTTPGET_OPEN;
 
     printf("getaddr finished\n");
-open:
-    assert(!errno);
     printf("open started\n");
+    req->state = HTTPGET_OPEN;
+open:
     assert(req->addrinfo);
     req->sockfd = -1;
 
@@ -710,11 +703,11 @@ open:
 
     sockconnect_init(ctx, &req->conn, req->sockfd, req->addrinfo->ai_addr,
                      req->addrinfo->ai_addrlen);
-    req->state = HTTPGET_CONNECT;
 
     printf("open finished\n");
-connect:
     printf("connect started\n");
+    req->state = HTTPGET_CONNECT;
+connect:
 
     if (task_blocked(ctx, &req->conn.task, perr)) {
         task->block = req->conn.task.block;
@@ -756,11 +749,11 @@ connect:
     snprintf(req->buffer, req->buffer_len, format, req->target, req->host);
     socksend_init(ctx, &req->send, req->sockfd, req->buffer,
                   strlen(req->buffer), 0);
-    req->state = HTTPGET_SEND;
 
     printf("connect finished\n");
-send:
     printf("send started\n");
+    req->state = HTTPGET_SEND;
+send:
 
     if (task_blocked(ctx, &req->send.task, perr)) {
         task->block = req->send.task.block;
@@ -776,11 +769,14 @@ send:
 
     sockrecv_init(ctx, &req->recv, req->sockfd, req->buffer,
                   req->buffer_len, 0);
-    req->state = HTTPGET_RECV;
 
     printf("send finished\n");
+    printf("status started\n");
+    req->state = HTTPGET_STATUS;
+status:
+    sockrecv_reset(ctx, &req->recv, req->buffer + req->data_len,
+                   req->buffer_len - req->data_len, 0);
 
-recv:
     if (task_blocked(ctx, &req->recv.task, perr)) {
         task->block = req->recv.task.block;
         return true;
@@ -788,44 +784,73 @@ recv:
 
     if (*perr) {
         context_panic(ctx, *perr,
-            "failed receiving from host: %s",
+            "failed receiving status from host: %s",
             context_message(ctx));
         return false;
     }
 
+    assert(req->recv.nrecv > 0);
+
+    if (req->data_len > 0
+            && req->buffer[req->data_len - 1] == '\r'
+            && req->buffer[req->data_len] == '\n') {
+        end = req->buffer + req->data_len - 1;
+    } else {
+        end = strnstr(req->buffer + req->data_len, "\r\n",
+                      req->recv.nrecv);
+    }
     req->data_len += req->recv.nrecv;
-    char *end = strnstr(req->buffer, "\r\n", req->data_len);
+
     if (end) {
-        *end = '\0';
-        req->status = req->buffer;
-        req->state = HTTPGET_STATUS;
+        size_t status_len = end - req->buffer;
+        req->status = strndup(req->buffer, status_len);
+        if (!req->status) {
+            errno = 0;
+            *perr = context_panic(ctx, ERROR_MEMORY,
+                "failed allocating %zu bytes", status_len + 1);
+            return false;
+        }
+        req->status_len = status_len;
+        req->data_len -= status_len + 2;
+        memmove(req->buffer, req->buffer + status_len + 2, req->data_len);
     } else {
         if (req->data_len == req->buffer_len) {
             httpget_grow(ctx, req, perr);
             if (*perr)
                 return false;
-            sockrecv_reset(ctx, &req->recv, req->buffer + req->data_len,
-                           req->buffer_len - req->data_len, 0);
         }
-        goto recv;
+        goto status;
     }
 
-status:
-    printf("status started\n");
-    printf("status: `%s`\n", req->status);
-    exit(0);
-    assert(0);
-    req->state = HTTPGET_HEADER;
     printf("status finished\n");
-
-header:
+    printf("status: `%s`\n", req->status);
     printf("header started\n");
 
-    req->state = HTTPGET_BODY;
-    printf("header finished\n");
+    req->state = HTTPGET_HEADER;
+header:
+    sockrecv_reset(ctx, &req->recv, req->buffer + req->data_len,
+                   req->buffer_len - req->data_len, 0);
 
-body:
+    if (task_blocked(ctx, &req->recv.task, perr)) {
+        task->block = req->recv.task.block;
+        return true;
+    }
+
+    assert(req->recv.nrecv > 0);
+
+    if (*perr) {
+        context_panic(ctx, *perr,
+            "failed receiving header from host: %s",
+            context_message(ctx));
+        return false;
+    }
+
+    exit(0);
+
+    printf("header finished\n");
     printf("body started\n");
+    req->state = HTTPGET_BODY;
+body:
     printf("body finished\n");
 
     if (task_blocked(ctx, &req->recv.task, perr)) {
@@ -855,7 +880,7 @@ body:
         printf("%.*s", (int)req->recv.nrecv, (char *)req->buffer);
         printf("\n----------------------------------------\n");
         sockrecv_reset(ctx, &req->recv, req->buffer, sizeof(req->buffer), 0);
-        goto recv;
+        goto body;
     }
 
     sockshutdown_init(ctx, &req->shutdown, req->sockfd, SHUT_RDWR);
@@ -908,7 +933,6 @@ void httpget_deinit(Context *ctx, HttpGet *req)
     case HTTPGET_BODY:
     case HTTPGET_HEADER:
     case HTTPGET_STATUS:
-    case HTTPGET_RECV:
         sockrecv_deinit(ctx, &req->recv);
 
     case HTTPGET_SEND:

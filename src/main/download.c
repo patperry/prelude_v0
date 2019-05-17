@@ -181,10 +181,10 @@ void await_io(Context *ctx, BlockIO *block, Error *perr)
     printf("calling poll...\n");
 
     if (block->flags & IO_READ) {
-        fds[0].events |= POLLIN | POLLPRI;
+        fds[0].events |= POLLIN;
     }
     if (block->flags & IO_WRITE) {
-        fds[0].events |= POLLOUT | POLLWRBAND;
+        fds[0].events |= POLLOUT;
     }
     fds[0].revents = 0;
 
@@ -332,13 +332,35 @@ typedef struct {
     const void *buffer;
     size_t length;
     int flags;
+    size_t nsend;
 } SockSend;
+
 
 bool socksend_blocked(Context *ctx, Task *task, Error *perr)
 {
-    (void)ctx;
-    (void)perr;
-    SockConnect *req = (SockConnect *)task;
+    SockSend *req = (SockSend *)task;
+    const void *buffer = req->buffer + req->nsend;
+    size_t length = req->length - req->nsend;
+    ssize_t nsend = send(req->sockfd, buffer, length, req->flags);
+
+    if (nsend < 0) {
+        int status = errno;
+        errno = 0;
+        if (status == EAGAIN || status == EWOULDBLOCK) {
+            req->task.block.type = BLOCK_IO;
+            req->task.block.job.io.fd = req->sockfd;
+            req->task.block.job.io.flags = IO_WRITE;
+            return true;
+        } else {
+            *perr = context_code(ctx, status);
+        }
+    } else {
+        req->nsend += (size_t)nsend;
+        if (req->nsend < req->length) {
+            return true;
+        }
+    }
+
     req->task.block.type = BLOCK_NONE;
     return false;
 }

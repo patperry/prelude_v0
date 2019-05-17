@@ -684,6 +684,13 @@ recv:
         return false;
     }
 
+    if (req->recv.nrecv > 0) {
+        printf("read %d bytes:\n", (int)req->recv.nrecv);
+        printf("----------------------------------------\n");
+        printf("%.*s", (int)req->recv.nrecv, (char *)req->buffer);
+        printf("\n----------------------------------------\n");
+    }
+
     sockshutdown_init(ctx, &req->shutdown, req->sockfd, SHUT_RDWR);
     req->state = HTTPGET_SHUTDOWN;
 

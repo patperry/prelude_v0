@@ -593,13 +593,33 @@ typedef struct {
 
     const char *status;
 
-    char buffer[4096];
+    char *buffer;
+    size_t buffer_len;
+    size_t data_len;
+
     const char *content;
     struct {
         const char *key;
         const char *value;
     } header;
 } HttpGet;
+
+
+
+static void httpget_grow(Context *ctx, HttpGet *req, Error *perr)
+{
+    size_t buffer_len = req->buffer_len * 2; // overflow?
+    char *buffer = realloc(req->buffer, buffer_len);
+
+    if (!buffer) {
+        errno = 0;
+        *perr = context_panic(ctx, ERROR_MEMORY,
+            "failed allocating %zu bytes", buffer_len);
+    } else {
+        req->buffer = buffer;
+        req->buffer_len = buffer_len;
+    }
+}
 
 
 bool httpget_blocked(Context *ctx, Task *task, Error *perr)
@@ -726,9 +746,23 @@ connect:
     }
 
     // send request
-    sprintf(req->buffer, "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n",
-            req->target, req->host);
+    const char *format = "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n";
+    {
+        size_t buffer_len =
+            (size_t)snprintf(NULL, 0, format, req->target, req->host) + 1;
+        if (buffer_len < 4096)
+            buffer_len = 4096;
 
+        req->buffer = malloc(buffer_len);
+        if (!req->buffer) {
+            *perr = context_panic(ctx, ERROR_MEMORY,
+                "failed allocating %d bytes", buffer_len);
+            return false;
+        }
+        req->buffer_len = buffer_len;
+    }
+
+    snprintf(req->buffer, req->buffer_len, format, req->target, req->host);
     socksend_init(ctx, &req->send, req->sockfd, req->buffer,
                   strlen(req->buffer), 0);
     req->state = HTTPGET_SEND;
@@ -750,7 +784,7 @@ send:
     }
 
     sockrecv_init(ctx, &req->recv, req->sockfd, req->buffer,
-                  sizeof(req->buffer), 0);
+                  req->buffer_len, 0);
     req->state = HTTPGET_RECV;
 
     printf("send finished\n");
@@ -770,18 +804,25 @@ recv:
         return false;
     }
 
-    char *end = strnstr(req->buffer, "\r\n", req->recv.nrecv);
+    req->data_len += req->recv.nrecv;
+    char *end = strnstr(req->buffer, "\r\n", req->data_len);
     if (end) {
         *end = '\0';
         req->status = req->buffer;
         req->state = HTTPGET_STATUS;
-    } else if (req->recv.nrecv == sizeof(req->buffer)) {
-        assert(0); // status line does not fit in buffer
+    } else if (req->data_len == req->buffer_len) {
+        httpget_grow(ctx, req, perr);
+        if (*perr)
+            return false;
+        sockrecv_reset(ctx, &req->recv, req->buffer + req->data_len,
+                       req->buffer_len - req->data_len, 0);
     }
     return true;
 
 status:
     printf("status started\n");
+    printf("status: `%s`\n", req->status);
+    exit(0);
     assert(0);
     req->state = HTTPGET_HEADER;
     printf("status finished\n");
@@ -895,6 +936,8 @@ void httpget_deinit(Context *ctx, HttpGet *req)
     case HTTPGET_INIT:
         break;
     }
+
+    free(req->buffer);
 }
 
 
@@ -934,25 +977,21 @@ int main(int argc, const char **argv)
     httpget_init(&ctx, &req, "www.unicode.org",
                  "/Public/12.0.0/ucd/UnicodeData.txt");
 
-    while (!err && req.state != HTTPGET_STATUS) {
-        task_advance(&ctx, &req.task, &err);
-    }
+    task_await(&ctx, &req.task, &err);
     if (err)
         goto exit;
 
     printf("Status: `%s`\n", req.status);
+    // headers
 
-    while (!err && req.state != HTTPGET_HEADER) {
-        task_advance(&ctx, &req.task, &err);
+    /*
+    while (httpget_advance(&ctx, &req, &err)) {
+        task_await(&ctx, &req.current.task, &err);
+        if (err)
+            goto exit;
+        // body
     }
-    if (err)
-        goto exit;
-
-    while (!err && req.state != HTTPGET_BODY) {
-        task_advance(&ctx, &req.task, &err);
-    }
-    if (err)
-        goto exit;
+    */
 
 exit:
     if (err) {

@@ -178,6 +178,8 @@ void await_io(Context *ctx, BlockIO *block, Error *perr)
     fds[0].fd = block->fd;
     fds[0].events = 0;
 
+    printf("calling poll...\n");
+
     if (block->flags & IO_READ) {
         fds[0].events |= POLLIN | POLLPRI;
     }
@@ -187,14 +189,19 @@ void await_io(Context *ctx, BlockIO *block, Error *perr)
     fds[0].revents = 0;
 
     if (poll(fds, 1, -1) < 0) {
+        printf("failure :(\n");
         *perr = context_code(ctx, errno);
         errno = 0;
     }
+
+    printf("success!\n");
 }
 
 
 void await_timer(Context *ctx, BlockTimer *block, Error *perr)
 {
+    (void)ctx;
+
     if (poll(NULL, 0, block->millis) < 0) {
         *perr = context_code(ctx, errno);
         errno = 0;
@@ -205,6 +212,7 @@ void await_timer(Context *ctx, BlockTimer *block, Error *perr)
 void task_await(Context *ctx, Task *task, Error *perr)
 {
     while (task_blocked(ctx, task, perr)) {
+        printf("blocked. waiting...\n");
         switch (task->block.type) {
         case BLOCK_NONE:
             break;
@@ -246,6 +254,7 @@ bool getaddrinfo_blocked(Context *ctx, Task *task, Error *perr)
 void getaddrinfo_init(Context *ctx, GetAddrInfo *req, const char *node,
                       const char *service, const struct addrinfo *hints)
 {
+    (void)ctx;
     memset(req, 0, sizeof(*req));
     req->task._blocked = getaddrinfo_blocked;
     req->node = node;
@@ -256,6 +265,8 @@ void getaddrinfo_init(Context *ctx, GetAddrInfo *req, const char *node,
 
 void getaddrinfo_deinit(Context *ctx, GetAddrInfo *req)
 {
+    (void)ctx;
+
     if (req->result) {
         freeaddrinfo(req->result);
     }
@@ -264,12 +275,35 @@ void getaddrinfo_deinit(Context *ctx, GetAddrInfo *req)
 
 typedef struct {
     Task task;
+    int sockfd;
+    const struct sockaddr *address;
+    socklen_t address_len;
+    bool started;
 } SockConnect;
 
 
 bool sockconnect_blocked(Context *ctx, Task *task, Error *perr)
 {
     SockConnect *req = (SockConnect *)task;
+
+    if (connect(req->sockfd, req->address, req->address_len) < 0) {
+        int status = errno;
+        errno = 0;
+
+        if (!req->started && status == EINPROGRESS) {
+            req->task.block.type = BLOCK_IO;
+            req->task.block.job.io.fd = req->sockfd;
+            req->task.block.job.io.flags = IO_WRITE;
+            req->started = true;
+            return true;
+        } else if (req->started && status == EALREADY) {
+            return true;
+        } else {
+            *perr = context_code(ctx, status);
+        }
+    }
+
+    req->task.block.type = BLOCK_NONE;
     return false;
 }
 
@@ -277,8 +311,13 @@ bool sockconnect_blocked(Context *ctx, Task *task, Error *perr)
 void sockconnect_init(Context *ctx, SockConnect *req, int sockfd,
                       const struct sockaddr *address, socklen_t address_len)
 {
+    (void)ctx;
     memset(req, 0, sizeof(*req));
     req->task._blocked = sockconnect_blocked;
+    req->sockfd = sockfd;
+    req->address = address;
+    req->address_len = address_len;
+    req->started = false;
 }
 
 void sockconnect_deinit(Context *ctx, SockConnect *conn)
@@ -289,15 +328,38 @@ void sockconnect_deinit(Context *ctx, SockConnect *conn)
 
 typedef struct {
     Task task;
+    int sockfd;
+    const void *buffer;
+    size_t length;
+    int flags;
 } SockSend;
+
+bool socksend_blocked(Context *ctx, Task *task, Error *perr)
+{
+    (void)ctx;
+    (void)perr;
+    SockConnect *req = (SockConnect *)task;
+    req->task.block.type = BLOCK_NONE;
+    return false;
+}
+
 
 void socksend_init(Context *ctx, SockSend *req, int sockfd,
                    const void *buffer, size_t length, int flags)
 {
+    (void)ctx;
+    memset(req, 0, sizeof(*req));
+    req->task._blocked = socksend_blocked;
+    req->sockfd = sockfd;
+    req->buffer = buffer;
+    req->length = length;
+    req->flags = flags;
 }
 
 void socksend_deinit(Context *ctx, SockSend *req)
 {
+    (void)ctx;
+    (void)req;
 }
 
 typedef enum {
@@ -348,6 +410,8 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
     req->state = HTTPGET_GETADDR;
 
 getaddr:
+    printf("getaddr started\n");
+
     if (task_blocked(ctx, &req->getaddr.task, perr)) {
         task->block = req->getaddr.task.block;
         return true;
@@ -363,7 +427,9 @@ getaddr:
     req->addrinfo = req->getaddr.result;
     req->state = HTTPGET_OPEN;
 
+    printf("getaddr finished\n");
 open:
+    printf("open started\n");
     assert(req->addrinfo);
     req->sockfd = -1;
 
@@ -392,7 +458,10 @@ open:
                      req->addrinfo->ai_addrlen);
     req->state = HTTPGET_CONNECT;
 
+    printf("open finished\n");
 connect:
+    printf("connect started\n");
+
     if (task_blocked(ctx, &req->conn.task, perr)) {
         task->block = req->conn.task.block;
         return true;
@@ -421,7 +490,10 @@ connect:
     socksend_init(ctx, &req->send, req->sockfd, message,  strlen(message), 0);
     req->state = HTTPGET_SEND;
 
+    printf("connect finished\n");
 send:
+    printf("send started\n");
+
     if (task_blocked(ctx, &req->send.task, perr)) {
         task->block = req->send.task.block;
         return true;
@@ -434,6 +506,8 @@ send:
         return false;
     }
 
+    printf("send finished\n");
+
     task->block.type = BLOCK_NONE;
     return false;
 }
@@ -442,6 +516,8 @@ send:
 void httpget_init(Context *ctx, HttpGet *req, const char *host,
                   const char *resource)
 {
+    (void)ctx;
+
     req->state = HTTPGET_INIT;
     req->host = host;
     req->resource = resource;
@@ -476,8 +552,8 @@ int main(int argc, const char **argv)
     (void)argc;
     (void)argv;
 
-    int64_t start = clock_usec(CLOCK_MONOTONIC_RAW);
-    int64_t deadline = start + 15 * 1000 * 1000; // 15s
+    // int64_t start = clock_usec(CLOCK_MONOTONIC_RAW);
+    // int64_t deadline = start + 15 * 1000 * 1000; // 15s
     Error err = 0;
 
     Context ctx;

@@ -168,12 +168,18 @@ typedef struct Task {
 
 bool task_blocked(Context *ctx, Task *task, Error *perr)
 {
+    if (*perr)
+        return false;
+
     return (task->_blocked)(ctx, task, perr);
 }
 
 
-void await_io(Context *ctx, BlockIO *block, Error *perr)
+static void await_io(Context *ctx, BlockIO *block, Error *perr)
 {
+    if (*perr)
+        return;
+
     struct pollfd fds[1];
     fds[0].fd = block->fd;
     fds[0].events = 0;
@@ -188,41 +194,64 @@ void await_io(Context *ctx, BlockIO *block, Error *perr)
     }
     fds[0].revents = 0;
 
+    assert(!errno);
     if (poll(fds, 1, -1) < 0) {
         printf("failure :(\n");
         *perr = context_code(ctx, errno);
         errno = 0;
     }
 
+    assert(!errno);
     printf("success!\n");
 }
 
 
-void await_timer(Context *ctx, BlockTimer *block, Error *perr)
+static void await_timer(Context *ctx, BlockTimer *block, Error *perr)
 {
-    (void)ctx;
+    if (*perr)
+        return;
 
+    assert(!errno);
     if (poll(NULL, 0, block->millis) < 0) {
-        *perr = context_code(ctx, errno);
+        int status = errno;
         errno = 0;
+        *perr = context_code(ctx, status);
     }
+}
+
+
+bool task_advance(Context *ctx, Task *task, Error *perr)
+{
+    if (*perr)
+        return false;
+
+    if (!task_blocked(ctx, task, perr)) {
+        return false;
+    }
+
+    printf("blocked. waiting...\n");
+    switch (task->block.type) {
+    case BLOCK_NONE:
+        break;
+    case BLOCK_IO:
+        await_io(ctx, &task->block.job.io, perr);
+        break;
+    case BLOCK_TIMER:
+        await_timer(ctx, &task->block.job.timer, perr);
+        break;
+    }
+
+    return true;
 }
 
 
 void task_await(Context *ctx, Task *task, Error *perr)
 {
-    while (task_blocked(ctx, task, perr)) {
-        printf("blocked. waiting...\n");
-        switch (task->block.type) {
-        case BLOCK_NONE:
-            break;
-        case BLOCK_IO:
-            await_io(ctx, &task->block.job.io, perr);
-            break;
-        case BLOCK_TIMER:
-            await_timer(ctx, &task->block.job.timer, perr);
-            break;
-        }
+    if (*perr)
+        return;
+
+    while (task_advance(ctx, task, perr)) {
+        // pass
     }
 }
 
@@ -239,14 +268,20 @@ typedef struct {
 
 bool getaddrinfo_blocked(Context *ctx, Task *task, Error *perr)
 {
+    assert(!errno);
+
+    if (*perr)
+        return false;
+
     GetAddrInfo *req = (GetAddrInfo *)task;
     int err = getaddrinfo(req->node, req->service, req->hints, &req->result);
 
     if (err) {
-        err = context_panic(ctx, ERROR_OS, gai_strerror(err));
+        *perr = context_panic(ctx, ERROR_OS, gai_strerror(err));
     }
+    errno = 0; // getaddrinfo sets it
 
-    *perr = err;
+    assert(!errno);
     return false;
 }
 
@@ -284,8 +319,14 @@ typedef struct {
 
 bool sockconnect_blocked(Context *ctx, Task *task, Error *perr)
 {
+    assert(!errno);
+
+    if (*perr)
+        return false;
+
     SockConnect *req = (SockConnect *)task;
 
+    printf("calling connect\n");
     if (connect(req->sockfd, req->address, req->address_len) < 0) {
         int status = errno;
         errno = 0;
@@ -298,12 +339,15 @@ bool sockconnect_blocked(Context *ctx, Task *task, Error *perr)
             return true;
         } else if (req->started && status == EALREADY) {
             return true;
+        } else if (req->started && status == EISCONN) {
+            // pass
         } else {
             *perr = context_code(ctx, status);
         }
     }
 
     req->task.block.type = BLOCK_NONE;
+    assert(!errno);
     return false;
 }
 
@@ -338,6 +382,9 @@ typedef struct {
 
 bool socksend_blocked(Context *ctx, Task *task, Error *perr)
 {
+    if (*perr)
+        return false;
+
     SockSend *req = (SockSend *)task;
     const void *buffer = (const char *)req->buffer + req->nsend;
     size_t length = req->length - req->nsend;
@@ -402,6 +449,9 @@ typedef struct {
 
 bool sockrecv_blocked(Context *ctx, Task *task, Error *perr)
 {
+    if (*perr)
+        return false;
+
     SockRecv *req = (SockRecv *)task;
     void *buffer = (char *)req->buffer + req->nrecv;
     size_t length = req->length - req->nrecv;
@@ -456,9 +506,13 @@ void sockrecv_deinit(Context *ctx, SockRecv *req)
 }
 
 
-void sockrecv_clear(Context *ctx, SockRecv *req)
+void sockrecv_reset(Context *ctx, SockRecv *req, void *buffer, size_t length,
+                    int flags)
 {
     (void)ctx;
+    req->buffer = buffer;
+    req->length = length;
+    req->flags = flags;
     req->nrecv = 0;
 }
 
@@ -472,12 +526,19 @@ typedef struct {
 
 bool sockshutdown_blocked(Context *ctx, Task *task, Error *perr)
 {
+    if (*perr)
+        return false;
+
     SockShutdown *req = (SockShutdown *)task;
+    assert(!errno);
     if (shutdown(req->sockfd, req->how) < 0) {
         int status = errno;
         errno = 0;
-        *perr = context_code(ctx, status);
+        if (status != ENOTCONN) { // peer closed the connenction
+            *perr = context_code(ctx, status);
+        }
     }
+    assert(!errno);
     return false;
 }
 
@@ -506,7 +567,8 @@ typedef enum {
     HTTPGET_CONNECT,
     HTTPGET_SEND,
     HTTPGET_RECV,
-    HTTPGET_SHUTDOWN
+    HTTPGET_SHUTDOWN,
+    HTTPGET_EXIT
 } HttpGetState;
 
 
@@ -525,11 +587,19 @@ typedef struct {
     SockShutdown shutdown;
 
     char buffer[4096];
+    const char *content;
+    struct {
+        const char *key;
+        const char *value;
+    } header;
 } HttpGet;
 
 
 bool httpget_blocked(Context *ctx, Task *task, Error *perr)
 {
+    if (*perr)
+        return false;
+
     HttpGet *req = (HttpGet *)task;
 
     switch (req->state) {
@@ -547,6 +617,8 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
         goto recv;
     case HTTPGET_SHUTDOWN:
         goto shutdown;
+    case HTTPGET_EXIT:
+        goto exit;
     }
 
 init:
@@ -580,6 +652,7 @@ getaddr:
 
     printf("getaddr finished\n");
 open:
+    assert(!errno);
     printf("open started\n");
     assert(req->addrinfo);
     req->sockfd = -1;
@@ -587,23 +660,29 @@ open:
     while (req->sockfd < 0 && req->addrinfo) {
         const struct addrinfo *ai = req->addrinfo;
 
+        assert(!errno);
         req->sockfd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (req->sockfd >= 0)
+        if (req->sockfd >= 0) {
             break;
-
-        int flags = fcntl(req->sockfd, F_GETFL, 0);
-        if (flags >= 0) {
-            fcntl(req->sockfd, F_SETFL, flags | O_NONBLOCK); // ignore error
         }
 
         req->addrinfo = req->addrinfo->ai_next;
     }
 
     if (req->sockfd < 0) {
-        *perr = context_panic(ctx, error_code(errno),
-            "failed opening socket: %s", strerror(errno));
+        int status = errno;
+        errno = 0;
+        *perr = context_panic(ctx, error_code(status),
+            "failed opening socket: %s", strerror(status));
+    }
+    assert(!errno);
+
+    int flags = fcntl(req->sockfd, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(req->sockfd, F_SETFL, flags | O_NONBLOCK); // ignore error
         errno = 0;
     }
+    assert(!errno);
 
     sockconnect_init(ctx, &req->conn, req->sockfd, req->addrinfo->ai_addr,
                      req->addrinfo->ai_addrlen);
@@ -672,7 +751,8 @@ recv:
             printf("%.*s", (int)req->recv.nrecv, (char *)req->buffer);
             printf("\n----------------------------------------\n");
 
-            sockrecv_clear(ctx, &req->recv);
+            sockrecv_reset(ctx, &req->recv,
+                           req->buffer, sizeof(req->buffer), 0);
         }
         return true;
     }
@@ -689,6 +769,8 @@ recv:
         printf("----------------------------------------\n");
         printf("%.*s", (int)req->recv.nrecv, (char *)req->buffer);
         printf("\n----------------------------------------\n");
+        sockrecv_reset(ctx, &req->recv, req->buffer, sizeof(req->buffer), 0);
+        goto recv;
     }
 
     sockshutdown_init(ctx, &req->shutdown, req->sockfd, SHUT_RDWR);
@@ -710,7 +792,10 @@ shutdown:
     }
 
     printf("shutdown finished\n");
+    req->state = HTTPGET_EXIT;
     task->block.type = BLOCK_NONE;
+
+exit:
     return false;
 }
 
@@ -731,6 +816,7 @@ void httpget_init(Context *ctx, HttpGet *req, const char *host,
 void httpget_deinit(Context *ctx, HttpGet *req)
 {
     switch (req->state) {
+    case HTTPGET_EXIT:
     case HTTPGET_SHUTDOWN:
         sockshutdown_deinit(ctx, &req->shutdown);
 
@@ -756,6 +842,26 @@ void httpget_deinit(Context *ctx, HttpGet *req)
 }
 
 
+bool httpget_header(Context *ctx, HttpGet *req, Error *perr)
+{
+    if (*perr)
+        return false;
+    (void)ctx;
+    (void)req;
+    return false;
+}
+
+
+bool httpget_content(Context *ctx, HttpGet *req, Error *perr)
+{
+    if (*perr)
+        return false;
+    (void)ctx;
+    (void)req;
+    return false;
+}
+
+
 int main(int argc, const char **argv)
 {
     (void)argc;
@@ -771,99 +877,28 @@ int main(int argc, const char **argv)
     HttpGet req;
     httpget_init(&ctx, &req, "www.unicode.org",
                  "/Public/12.0.0/ucd/UnicodeData.txt");
-    task_await(&ctx, &req.task, &err);
+
+    while (!err && !req.content) {
+        while (httpget_header(&ctx, &req, &err)) {
+            printf("%s: %s\n", req.header.key, req.header.value);
+        }
+
+        task_advance(&ctx, &req.task, &err);
+    }
+
+    while (!err && req.content) {
+        while (httpget_content(&ctx, &req, &err)) {
+            printf("%s", req.content);
+        }
+        task_advance(&ctx, &req.task, &err);
+    }
+
     if (err) {
         fprintf(stderr, "error: %s", context_message(&ctx));
-        return EXIT_FAILURE;
     }
 
     httpget_deinit(&ctx, &req);
+    context_deinit(&ctx);
 
     return err ? EXIT_FAILURE : EXIT_SUCCESS;
-
-    /*
-
-    Error err = ERROR_NONE;
-
-    const char *host = ;
-    const char *service = "http";
-    Context ctx;
-    Socket sock;
-    bool has_sock = false;
-    int32_t deadline = 60 * 1000;
-
-    task_await(&ctx, &lookup.task, deadline, &err);
-    if (err)
-        goto hostlookup_fail;
-
-    while (!has_sock && hostlookup_advance(&ctx, &lookup, &err)) {
-        socket_init(&ctx, &sock, look.family, look.comm, lookup.proto, &err);
-        if (err)
-            continue;
-
-        SocketConnect req;
-        socket_connect(&ctx, &req, &sock, &look.addr);
-        task_await(&ctx, &req.task, deadline, &err);
-
-        if (err) {
-            socket_deinit(&ctx, &sock);
-            err = context_recover(&ctx);
-        } else {
-            has_sock = true;
-        }
-    }
-
-    if (!has_sock) { // lookup failed or could not connect to an address
-        goto connect_fail;
-    }
-
-    // http://www.unicode.org/Public/12.0.0/data/ucd/UnicodeData.txt
-    const char *message = 
-        "GET /Public/12.0.0/ucd/UnicodeData.txt HTTP/1.1\r\n"
-        "Host: www.unicode.org\r\n"
-        "\r\n";
-
-    SocketWrite write;
-    socket_write(&ctx, &write, &sock, message, strlen(message), 0);
-    task_await(&ctx, &write.task, deadline, &err);
-    if (err) {
-        goto write_fail;
-    }
-
-    char response[4096];
-    memset(response, 0, sizeof(response));
-    int total = sizeof(response)-1;
-    int received = 0;
-    int bytes = 0;
-
-    do {
-        SocketRead read;
-        socket_read(&ctx, &read, &sock, response, total, 0, &bytes);
-        task_await(&ctx, &read.task, deadline, &err);
-        if (err) {
-            goto read_fail;
-        }
-
-        printf("%s", response);
-        memset(response, 0, sizeof(response));
-        printf("bytes = %d\n", bytes);
-    } while (bytes > 0);
-
-    SocketShutdown shutdown;
-    socket_shutdown(&ctx, &shutdown, &sock);
-    task_await(&ctx, &shutdown.task, deadline, &err);
-    if (err) {
-        goto shutdown_fail;
-    }
-
-shutdown_fail:
-read_fail:
-write_fail:
-    socket_deinit(&sock);
-connect_fail:
-hostlookup_fail:
-    hostlookup_deinit(&lookup);
-    context_deinit(&ctx);
-    return err;
-    */
 }

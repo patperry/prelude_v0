@@ -473,6 +473,8 @@ bool sockrecv_blocked(Context *ctx, Task *task, Error *perr)
         } else {
             *perr = context_code(ctx, status);
         }
+    } else if (nrecv == 0) {
+        *perr = context_panic(ctx, ERROR_OS, "connection reset by peer");
     } else {
         req->nrecv += (size_t)nrecv;
         if (req->nrecv > 0 && req->nrecv < req->length) {
@@ -567,6 +569,9 @@ typedef enum {
     HTTPGET_CONNECT,
     HTTPGET_SEND,
     HTTPGET_RECV,
+    HTTPGET_STATUS,
+    HTTPGET_HEADER,
+    HTTPGET_BODY,
     HTTPGET_SHUTDOWN,
     HTTPGET_EXIT
 } HttpGetState;
@@ -576,7 +581,7 @@ typedef struct {
     Task task;
     HttpGetState state;
     const char *host;
-    const char *resource;
+    const char *target;
 
     GetAddrInfo getaddr;
     const struct addrinfo *addrinfo;
@@ -585,6 +590,8 @@ typedef struct {
     SockSend send;
     SockRecv recv;
     SockShutdown shutdown;
+
+    const char *status;
 
     char buffer[4096];
     const char *content;
@@ -615,6 +622,12 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
         goto send;
     case HTTPGET_RECV:
         goto recv;
+    case HTTPGET_STATUS:
+        goto status;
+    case HTTPGET_HEADER:
+        goto header;
+    case HTTPGET_BODY:
+        goto body;
     case HTTPGET_SHUTDOWN:
         goto shutdown;
     case HTTPGET_EXIT:
@@ -712,8 +725,9 @@ connect:
         return false;
     }
 
+    // send request
     sprintf(req->buffer, "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n",
-            req->resource, req->host);
+            req->target, req->host);
 
     socksend_init(ctx, &req->send, req->sockfd, req->buffer,
                   strlen(req->buffer), 0);
@@ -740,8 +754,47 @@ send:
     req->state = HTTPGET_RECV;
 
     printf("send finished\n");
+
 recv:
-    printf("recv started\n");
+    if (task_blocked(ctx, &req->recv.task, perr)) {
+        task->block = req->recv.task.block;
+        if (req->recv.nrecv == 0) {
+            return true;
+        }
+    }
+
+    if (*perr) {
+        context_panic(ctx, *perr,
+            "failed receiving from host: %s",
+            context_message(ctx));
+        return false;
+    }
+
+    char *end = strnstr(req->buffer, "\r\n", req->recv.nrecv);
+    if (end) {
+        *end = '\0';
+        req->status = req->buffer;
+        req->state = HTTPGET_STATUS;
+    } else if (req->recv.nrecv == sizeof(req->buffer)) {
+        assert(0); // status line does not fit in buffer
+    }
+    return true;
+
+status:
+    printf("status started\n");
+    assert(0);
+    req->state = HTTPGET_HEADER;
+    printf("status finished\n");
+
+header:
+    printf("header started\n");
+
+    req->state = HTTPGET_BODY;
+    printf("header finished\n");
+
+body:
+    printf("body started\n");
+    printf("body finished\n");
 
     if (task_blocked(ctx, &req->recv.task, perr)) {
         task->block = req->recv.task.block;
@@ -801,13 +854,13 @@ exit:
 
 
 void httpget_init(Context *ctx, HttpGet *req, const char *host,
-                  const char *resource)
+                  const char *target)
 {
     (void)ctx;
 
     req->state = HTTPGET_INIT;
     req->host = host;
-    req->resource = resource;
+    req->target = target;
     req->task.block.type = BLOCK_NONE;
     req->task._blocked = httpget_blocked;
 }
@@ -820,6 +873,9 @@ void httpget_deinit(Context *ctx, HttpGet *req)
     case HTTPGET_SHUTDOWN:
         sockshutdown_deinit(ctx, &req->shutdown);
 
+    case HTTPGET_BODY:
+    case HTTPGET_HEADER:
+    case HTTPGET_STATUS:
     case HTTPGET_RECV:
         sockrecv_deinit(ctx, &req->recv);
 
@@ -878,21 +934,27 @@ int main(int argc, const char **argv)
     httpget_init(&ctx, &req, "www.unicode.org",
                  "/Public/12.0.0/ucd/UnicodeData.txt");
 
-    while (!err && !req.content) {
-        while (httpget_header(&ctx, &req, &err)) {
-            printf("%s: %s\n", req.header.key, req.header.value);
-        }
-
+    while (!err && req.state != HTTPGET_STATUS) {
         task_advance(&ctx, &req.task, &err);
     }
+    if (err)
+        goto exit;
 
-    while (!err && req.content) {
-        while (httpget_content(&ctx, &req, &err)) {
-            printf("%s", req.content);
-        }
+    printf("Status: `%s`\n", req.status);
+
+    while (!err && req.state != HTTPGET_HEADER) {
         task_advance(&ctx, &req.task, &err);
     }
+    if (err)
+        goto exit;
 
+    while (!err && req.state != HTTPGET_BODY) {
+        task_advance(&ctx, &req.task, &err);
+    }
+    if (err)
+        goto exit;
+
+exit:
     if (err) {
         fprintf(stderr, "error: %s", context_message(&ctx));
     }

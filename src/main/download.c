@@ -534,7 +534,7 @@ bool sockshutdown_blocked(Context *ctx, Task *task, Error *perr)
     if (shutdown(req->sockfd, req->how) < 0) {
         int status = errno;
         errno = 0;
-        if (status != ENOTCONN) { // peer closed the connenction
+        if (status != ENOTCONN) { // peer closed the connection
             *perr = context_code(ctx, status);
         }
     }

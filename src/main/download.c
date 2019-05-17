@@ -52,18 +52,21 @@ int64_t clock_usec(clockid_t clock_id)
 #define CONTEXT_BUFFER_MAX 1024
 
 typedef struct {
-    Error err;
-
     char _buffer0[CONTEXT_BUFFER_MAX];
     char _buffer1[CONTEXT_BUFFER_MAX];
     int _active;
 } Context;
 
-void context_init(Context *ctx)
+void context_clear(Context *ctx)
 {
-    ctx->err = ERROR_NONE;
+    ctx->_buffer0[0] = '\0';
     ctx->_buffer1[0] = '\0';
     ctx->_active = 0;
+}
+
+void context_init(Context *ctx)
+{
+    context_clear(ctx);
 }
 
 void context_deinit(Context *ctx)
@@ -76,12 +79,6 @@ const char *context_message(Context *ctx)
     return (ctx->_active) ? ctx->_buffer1 : ctx->_buffer0;
 }
 
-void context_recover(Context *ctx)
-{
-    ctx->err = 0;
-    ctx->_buffer0[0] = '\0';
-    ctx->_buffer1[0] = '\0';
-}
 
 Error context_panic(Context *ctx, Error err, const char *format, ...)
 {
@@ -91,7 +88,6 @@ Error context_panic(Context *ctx, Error err, const char *format, ...)
     vsnprintf(buffer, sizeof(ctx->_buffer0), format, args);
     va_end(args);
     ctx->_active = ctx->_active ? 0 : 1;
-    ctx->err = err;
     return err;
 }
 
@@ -103,7 +99,7 @@ Error context_code(Context *ctx, int errnum)
     if (err) {
         context_panic(ctx, err, strerror(errnum));
     } else {
-        context_recover(ctx);
+        context_clear(ctx);
     }
 
     return err;
@@ -453,14 +449,12 @@ bool sockrecv_blocked(Context *ctx, Task *task, Error *perr)
         return false;
 
     SockRecv *req = (SockRecv *)task;
-    void *buffer = (char *)req->buffer + req->nrecv;
-    size_t length = req->length - req->nrecv;
 
-    if (length == 0) {
+    if (req->length == 0) {
         return false;
     }
 
-    ssize_t nrecv = recv(req->sockfd, buffer, length, req->flags);
+    ssize_t nrecv = recv(req->sockfd, req->buffer, req->length, req->flags);
 
     if (nrecv < 0) {
         int status = errno;
@@ -476,10 +470,7 @@ bool sockrecv_blocked(Context *ctx, Task *task, Error *perr)
     } else if (nrecv == 0) {
         *perr = context_panic(ctx, ERROR_OS, "connection reset by peer");
     } else {
-        req->nrecv += (size_t)nrecv;
-        if (req->nrecv > 0 && req->nrecv < req->length) {
-            return true;
-        }
+        req->nrecv = (size_t)nrecv;
     }
 
     req->task.block.type = BLOCK_NONE;
@@ -792,9 +783,7 @@ send:
 recv:
     if (task_blocked(ctx, &req->recv.task, perr)) {
         task->block = req->recv.task.block;
-        if (req->recv.nrecv == 0) {
-            return true;
-        }
+        return true;
     }
 
     if (*perr) {
@@ -810,14 +799,16 @@ recv:
         *end = '\0';
         req->status = req->buffer;
         req->state = HTTPGET_STATUS;
-    } else if (req->data_len == req->buffer_len) {
-        httpget_grow(ctx, req, perr);
-        if (*perr)
-            return false;
-        sockrecv_reset(ctx, &req->recv, req->buffer + req->data_len,
-                       req->buffer_len - req->data_len, 0);
+    } else {
+        if (req->data_len == req->buffer_len) {
+            httpget_grow(ctx, req, perr);
+            if (*perr)
+                return false;
+            sockrecv_reset(ctx, &req->recv, req->buffer + req->data_len,
+                           req->buffer_len - req->data_len, 0);
+        }
+        goto recv;
     }
-    return true;
 
 status:
     printf("status started\n");

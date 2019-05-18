@@ -758,7 +758,6 @@ static void httpget_add_header(Context *ctx, HttpGet *req, uint8_t *line,
 bool httpget_blocked(Context *ctx, Task *task, Error *perr)
 {
     struct addrinfo hints;
-    uint8_t *end;
 
     if (*perr)
         return false;
@@ -921,11 +920,6 @@ send:
     req->state = HTTPGET_META;
 
 meta:
-    printf("sockrecv_reset(%p, %zu)\n", (void *)(req->data + req->data_len),
-           (size_t)(req->data_max - req->data_len));
-    sockrecv_reset(ctx, &req->recv, req->data + req->data_len,
-                   req->data_max - req->data_len, 0);
-
     if (task_blocked(ctx, &req->recv.task, perr)) {
         task->block = req->recv.task.block;
         return true;
@@ -940,19 +934,14 @@ meta:
 
     assert(req->recv.nrecv > 0);
 
-    if (req->data_len > 0
-            && req->data[req->data_len - 1] == '\r'
-            && req->data[req->data_len] == '\n') {
-        end = req->data + req->data_len - 1;
-    } else {
-        end = memmem(req->data + req->data_len, req->recv.nrecv, "\r\n", 2);
-    }
     req->data_len += req->recv.nrecv;
+    uint8_t *line_end;
+    bool empty_line = false;
 
-    if (end) {
-        *end = '\0';
+    while ((line_end = memmem(req->data, req->data_len, "\r\n", 2))) {
+        *line_end = '\0';
         uint8_t *line = req->data;
-        size_t line_len = end - line;
+        size_t line_len = line_end - line;
         size_t line_size = line_len + 2;
 
         req->data += line_size;
@@ -960,7 +949,8 @@ meta:
         req->data_max -= line_size;
 
         if (line_len == 0) { // end of headers
-            req->state = HTTPGET_BODY;
+            empty_line = true;
+            break;
         } else if (!req->status) { // status
             httpget_set_status(ctx, req, line, line_len, perr);
             if (*perr)
@@ -983,11 +973,15 @@ meta:
             return false;
     }
 
-    if (req->state == HTTPGET_META)
+    sockrecv_reset(ctx, &req->recv, req->data + req->data_len,
+                   req->data_max - req->data_len, 0);
+
+    if (!empty_line)
         goto meta;
 
     printf("meta finished\n");
     printf("body started\n");
+    req->state = HTTPGET_BODY;
 body:
     exit(0);
     printf("body finished\n");

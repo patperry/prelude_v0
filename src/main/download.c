@@ -269,7 +269,8 @@ bool getaddrinfo_blocked(Context *ctx, Task *task)
     int status = getaddrinfo(req->node, req->service, req->hints, &req->result);
 
     if (status) {
-        context_panic(ctx, ERROR_OS, gai_strerror(status));
+        context_panic(ctx, ERROR_OS, "failed getting address information: %s",
+                      gai_strerror(status));
     }
 
     return false;
@@ -328,7 +329,10 @@ bool sockconnect_blocked(Context *ctx, Task *task)
         } else if (req->started && status == EISCONN) {
             // pass
         } else {
+            assert(status);
             context_code(ctx, status);
+            context_panic(ctx, ctx->error,
+                          "failed connecting to peer: %s", ctx->message);
         }
     }
 
@@ -388,7 +392,10 @@ bool socksend_blocked(Context *ctx, Task *task)
             req->task.block.job.io.flags = IO_WRITE;
             return true;
         } else {
+            assert(status);
             context_code(ctx, status);
+            context_panic(ctx, ctx->error,
+                          "failed sending data: %s", ctx->message);
         }
     } else {
         req->nsend += (size_t)nsend;
@@ -454,10 +461,14 @@ bool sockrecv_blocked(Context *ctx, Task *task)
             req->task.block.job.io.flags = IO_READ;
             return true;
         } else {
+            assert(status);
             context_code(ctx, status);
+            context_panic(ctx, ctx->error,
+                          "failed receiving data: %s", ctx->message);
         }
     } else if (nrecv == 0) {
-        context_panic(ctx, ERROR_OS, "connection reset by peer");
+        context_panic(ctx, ERROR_OS,
+                      "failed receiving data: connection reset by peer");
     } else {
         req->nrecv = (size_t)nrecv;
     }
@@ -500,8 +511,6 @@ void sockrecv_deinit(Context *ctx, SockRecv *req)
 }
 
 
-
-
 typedef struct {
     Task task;
     int sockfd;
@@ -518,7 +527,11 @@ bool sockshutdown_blocked(Context *ctx, Task *task)
     if (shutdown(req->sockfd, req->how) < 0) {
         int status = errno;
         if (status != ENOTCONN) { // peer closed the connection
+            assert(status);
             context_code(ctx, status);
+            context_panic(ctx, ctx->error,
+                          "failed shutting down connection to peer: %s",
+                          ctx->message);
         }
     }
 
@@ -681,7 +694,7 @@ static void httpget_set_status(Context *ctx, HttpGet *req, uint8_t *line,
 
     assert_ascii(ctx, line, line_len);
     if (ctx->error) {
-        context_panic(ctx, ERROR_VALUE, "invalid HTTP status line: %s",
+        context_panic(ctx, ctx->error, "failed parsing HTTP status line: %s",
                       ctx->message);
         return;
     }
@@ -706,7 +719,7 @@ static void httpget_add_header(Context *ctx, HttpGet *req, uint8_t *line,
     assert_ascii(ctx, line, line_len);
     if (ctx->error) {
         context_panic(ctx, ERROR_VALUE,
-            "invalid HTTP header line in position %zu: %s",
+            "failed parsing HTTP header line in position %zu: %s",
             i + 1, ctx->message);
         return;
     }
@@ -715,7 +728,7 @@ static void httpget_add_header(Context *ctx, HttpGet *req, uint8_t *line,
     char *colon = strstr(key, ":");
     if (!colon) {
         context_panic(ctx, ERROR_VALUE,
-                      "invalid HTTP header line in position %zu: %s",
+                      "failed parsing HTTP header line in position %zu: %s",
                       i + 1, "missing colon (:)");
         return;
     }
@@ -763,13 +776,6 @@ static bool httpget_getaddr(Context *ctx, HttpGet *req)
     if (task_blocked(ctx, &req->getaddr.task)) {
         req->task.block = req->getaddr.task.block;
         return true;
-    }
-
-    if (ctx->error) {
-        context_panic(ctx, ctx->error,
-            "failed getting host address information: %s",
-            ctx->message);
-        return false;
     }
 
     req->addrinfo = req->getaddr.result;
@@ -836,16 +842,17 @@ static bool httpget_connect(Context *ctx, HttpGet *req)
         return false;
     } else if (ctx->error) {
         req->addrinfo = req->addrinfo->ai_next;
+
         if (req->addrinfo) {
             context_recover(ctx);
             sockconnect_deinit(ctx, &req->conn);
             close(req->sockfd);
             req->state = HTTPGET_OPEN;
-            return false;
+        } else {
+            context_panic(ctx, ctx->error, "failed connecting to host: %s",
+                          ctx->message);
         }
 
-        context_panic(ctx, ctx->error, "failed connecting to host: %s",
-                      ctx->message);
         return false;
     }
 
@@ -887,12 +894,6 @@ static bool httpget_send(Context *ctx, HttpGet *req)
         return true;
     }
 
-    if (ctx->error) {
-        context_panic(ctx, ctx->error, "failed sending to host: %s",
-                      ctx->message);
-        return false;
-    }
-
     req->data = req->buffer;
     req->data_len = 0;
     req->data_max = req->buffer_len;
@@ -916,13 +917,6 @@ static bool httpget_meta(Context *ctx, HttpGet *req)
         return true;
     }
 
-    if (ctx->error) {
-        context_panic(ctx, ctx->error,
-                      "failed receiving status from host: %s",
-                      ctx->message);
-        return false;
-    }
-
     req->data_len += req->recv.nrecv;
 
     uint8_t *line_end;
@@ -943,20 +937,13 @@ static bool httpget_meta(Context *ctx, HttpGet *req)
             break;
         } else if (!req->status) { // status
             httpget_set_status(ctx, req, line, line_len);
-            if (ctx->error)
-                return false;
         } else {
             httpget_add_header(ctx, req, line, line_len);
-            if (ctx->error)
-                return false;
         }
     }
 
     if (req->data_max - req->data_len < BUFFER_MIN) {
-        printf("growing buffer\n");
         httpget_grow_buffer(ctx, req);
-        if (ctx->error)
-            return false;
     }
 
     sockrecv_reinit(ctx, &req->recv, req->sockfd, req->data + req->data_len,

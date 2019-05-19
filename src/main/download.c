@@ -923,8 +923,6 @@ static bool httpget_meta(Context *ctx, HttpGet *req)
         return false;
     }
 
-    assert(req->recv.nrecv > 0);
-
     req->data_len += req->recv.nrecv;
 
     uint8_t *line_end;

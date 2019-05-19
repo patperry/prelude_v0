@@ -27,8 +27,7 @@ typedef enum {
     ERROR_MEMORY,
     ERROR_VALUE,
     ERROR_OVERFLOW,
-    ERROR_OS,
-    ERROR_INTERRUPT
+    ERROR_OS
 } Error;
 
 
@@ -43,8 +42,6 @@ int error_code(int errnum)
         return ERROR_MEMORY;
     case EOVERFLOW:
         return ERROR_OVERFLOW;
-    case EINTR:
-        return ERROR_INTERRUPT;
     default:
         return ERROR_OS;
     }
@@ -318,24 +315,27 @@ bool sockconnect_blocked(Context *ctx, Task *task)
     if (connect(req->sockfd, req->address, req->address_len) < 0) {
         int status = errno;
 
-        if (!req->started && status == EINPROGRESS) {
-            req->task.block.type = BLOCK_IO;
-            req->task.block.job.io.fd = req->sockfd;
-            req->task.block.job.io.flags = IO_WRITE;
-            req->started = true;
+        if (!req->started) {
+            if (status == EINPROGRESS) {
+                req->task.block.type = BLOCK_IO;
+                req->task.block.job.io.fd = req->sockfd;
+                req->task.block.job.io.flags = IO_WRITE;
+                req->started = true;
+                return true;
+            }
+        } else if (status == EALREADY || status == EINTR) {
             return true;
-        } else if (req->started && status == EALREADY) {
-            return true;
-        } else if (req->started && status == EISCONN) {
-            // pass
-        } else {
-            assert(status);
-            context_code(ctx, status);
-            context_panic(ctx, ctx->error,
-                          "failed connecting to peer: %s", ctx->message);
+        } else if (status == EISCONN) {
+            goto exit;
         }
+
+        assert(status);
+        context_code(ctx, status);
+        context_panic(ctx, ctx->error, "failed connecting to peer: %s",
+                      ctx->message);
     }
 
+exit:
     req->task.block.type = BLOCK_NONE;
     return false;
 }
@@ -386,7 +386,7 @@ bool socksend_blocked(Context *ctx, Task *task)
 
     if (nsend < 0) {
         int status = errno;
-        if (status == EAGAIN || status == EWOULDBLOCK) {
+        if (status == EAGAIN || status == EWOULDBLOCK || status == EINTR) {
             req->task.block.type = BLOCK_IO;
             req->task.block.job.io.fd = req->sockfd;
             req->task.block.job.io.flags = IO_WRITE;
@@ -455,7 +455,7 @@ bool sockrecv_blocked(Context *ctx, Task *task)
 
     if (nrecv < 0) {
         int status = errno;
-        if (status == EAGAIN || status == EWOULDBLOCK) {
+        if (status == EAGAIN || status == EWOULDBLOCK || status == EINTR) {
             req->task.block.type = BLOCK_IO;
             req->task.block.job.io.fd = req->sockfd;
             req->task.block.job.io.flags = IO_READ;
@@ -838,9 +838,7 @@ static bool httpget_connect(Context *ctx, HttpGet *req)
         return true;
     }
 
-    if (ctx->error == ERROR_INTERRUPT) { // hide this??
-        return false;
-    } else if (ctx->error) {
+    if (ctx->error) {
         req->addrinfo = req->addrinfo->ai_next;
 
         if (req->addrinfo) {
@@ -917,12 +915,18 @@ static bool httpget_meta(Context *ctx, HttpGet *req)
         return true;
     }
 
+    if (ctx->error)
+        return false;
+
     req->data_len += req->recv.nrecv;
 
     uint8_t *line_end;
     bool empty_line = false;
 
     while ((line_end = memmem(req->data, req->data_len, "\r\n", 2))) {
+        if (ctx->error)
+            return false;
+
         *line_end = '\0';
         uint8_t *line = req->data;
         size_t line_len = line_end - line;
@@ -948,6 +952,9 @@ static bool httpget_meta(Context *ctx, HttpGet *req)
 
     sockrecv_reinit(ctx, &req->recv, req->sockfd, req->data + req->data_len,
                     req->data_max - req->data_len, 0);
+
+    if (ctx->error)
+        return false;
 
     if (empty_line) {
         printf("meta finished\n");

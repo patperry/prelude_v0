@@ -28,7 +28,7 @@ typedef enum {
     ERROR_VALUE,
     ERROR_OVERFLOW,
     ERROR_OS,
-    ERROR_TIMEOUT,
+    ERROR_INTERRUPT
 } Error;
 
 
@@ -43,6 +43,8 @@ int error_code(int errnum)
         return ERROR_MEMORY;
     case EOVERFLOW:
         return ERROR_OVERFLOW;
+    case EINTR:
+        return ERROR_INTERRUPT;
     default:
         return ERROR_OS;
     }
@@ -166,22 +168,22 @@ typedef struct {
 
 typedef struct Task {
     Block block;
-    bool (*_blocked)(Context *ctx, struct Task *task, Error *perr);
+    bool (*_blocked)(Context *ctx, struct Task *task, Error *err);
 } Task;
 
 
-bool task_blocked(Context *ctx, Task *task, Error *perr)
+bool task_blocked(Context *ctx, Task *task, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
-    return (task->_blocked)(ctx, task, perr);
+    return (task->_blocked)(ctx, task, err);
 }
 
 
-static void await_io(Context *ctx, BlockIO *block, Error *perr)
+static void await_io(Context *ctx, BlockIO *block, Error *err)
 {
-    if (*perr)
+    if (*err)
         return;
 
     struct pollfd fds[1];
@@ -197,29 +199,29 @@ static void await_io(Context *ctx, BlockIO *block, Error *perr)
     fds[0].revents = 0;
 
     if (poll(fds, 1, -1) < 0) {
-        *perr = context_code(ctx, errno);
+        *err = context_code(ctx, errno);
     }
 }
 
 
-static void await_timer(Context *ctx, BlockTimer *block, Error *perr)
+static void await_timer(Context *ctx, BlockTimer *block, Error *err)
 {
-    if (*perr)
+    if (*err)
         return;
 
     if (poll(NULL, 0, block->millis) < 0) {
         int status = errno;
-        *perr = context_code(ctx, status);
+        *err = context_code(ctx, status);
     }
 }
 
 
-bool task_advance(Context *ctx, Task *task, Error *perr)
+bool task_advance(Context *ctx, Task *task, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
-    if (!task_blocked(ctx, task, perr)) {
+    if (!task_blocked(ctx, task, err)) {
         return false;
     }
 
@@ -228,10 +230,10 @@ bool task_advance(Context *ctx, Task *task, Error *perr)
     case BLOCK_NONE:
         break;
     case BLOCK_IO:
-        await_io(ctx, &task->block.job.io, perr);
+        await_io(ctx, &task->block.job.io, err);
         break;
     case BLOCK_TIMER:
-        await_timer(ctx, &task->block.job.timer, perr);
+        await_timer(ctx, &task->block.job.timer, err);
         break;
     }
 
@@ -239,12 +241,12 @@ bool task_advance(Context *ctx, Task *task, Error *perr)
 }
 
 
-void task_await(Context *ctx, Task *task, Error *perr)
+void task_await(Context *ctx, Task *task, Error *err)
 {
-    if (*perr)
+    if (*err)
         return;
 
-    while (task_advance(ctx, task, perr)) {
+    while (task_advance(ctx, task, err)) {
         // pass
     }
 }
@@ -259,16 +261,16 @@ typedef struct {
 } GetAddrInfo;
 
 
-bool getaddrinfo_blocked(Context *ctx, Task *task, Error *perr)
+bool getaddrinfo_blocked(Context *ctx, Task *task, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
     GetAddrInfo *req = (GetAddrInfo *)task;
     int status = getaddrinfo(req->node, req->service, req->hints, &req->result);
 
     if (status) {
-        *perr = context_panic(ctx, ERROR_OS, gai_strerror(status));
+        *err = context_panic(ctx, ERROR_OS, gai_strerror(status));
     }
 
     return false;
@@ -306,9 +308,9 @@ typedef struct {
 } SockConnect;
 
 
-bool sockconnect_blocked(Context *ctx, Task *task, Error *perr)
+bool sockconnect_blocked(Context *ctx, Task *task, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
     SockConnect *req = (SockConnect *)task;
@@ -327,7 +329,7 @@ bool sockconnect_blocked(Context *ctx, Task *task, Error *perr)
         } else if (req->started && status == EISCONN) {
             // pass
         } else {
-            *perr = context_code(ctx, status);
+            *err = context_code(ctx, status);
         }
     }
 
@@ -364,9 +366,9 @@ typedef struct {
 } SockSend;
 
 
-bool socksend_blocked(Context *ctx, Task *task, Error *perr)
+bool socksend_blocked(Context *ctx, Task *task, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
     SockSend *req = (SockSend *)task;
@@ -387,7 +389,7 @@ bool socksend_blocked(Context *ctx, Task *task, Error *perr)
             req->task.block.job.io.flags = IO_WRITE;
             return true;
         } else {
-            *perr = context_code(ctx, status);
+            *err = context_code(ctx, status);
         }
     } else {
         req->nsend += (size_t)nsend;
@@ -430,9 +432,9 @@ typedef struct {
 } SockRecv;
 
 
-bool sockrecv_blocked(Context *ctx, Task *task, Error *perr)
+bool sockrecv_blocked(Context *ctx, Task *task, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
     SockRecv *req = (SockRecv *)task;
@@ -451,10 +453,10 @@ bool sockrecv_blocked(Context *ctx, Task *task, Error *perr)
             req->task.block.job.io.flags = IO_READ;
             return true;
         } else {
-            *perr = context_code(ctx, status);
+            *err = context_code(ctx, status);
         }
     } else if (nrecv == 0) {
-        *perr = context_panic(ctx, ERROR_OS, "connection reset by peer");
+        *err = context_panic(ctx, ERROR_OS, "connection reset by peer");
     } else {
         req->nrecv = (size_t)nrecv;
     }
@@ -503,16 +505,16 @@ typedef struct {
 } SockShutdown;
 
 
-bool sockshutdown_blocked(Context *ctx, Task *task, Error *perr)
+bool sockshutdown_blocked(Context *ctx, Task *task, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
     SockShutdown *req = (SockShutdown *)task;
     if (shutdown(req->sockfd, req->how) < 0) {
         int status = errno;
         if (status != ENOTCONN) { // peer closed the connection
-            *perr = context_code(ctx, status);
+            *err = context_code(ctx, status);
         }
     }
 
@@ -585,9 +587,9 @@ typedef struct {
 } HttpGet;
 
 
-static void httpget_grow_buffer(Context *ctx, HttpGet *req, Error *perr)
+static void httpget_grow_buffer(Context *ctx, HttpGet *req, Error *err)
 {
-    if (*perr)
+    if (*err)
         return;
 
     size_t old_buffer_len = req->buffer_len;
@@ -596,7 +598,7 @@ static void httpget_grow_buffer(Context *ctx, HttpGet *req, Error *perr)
     char *new_buffer = realloc(old_buffer, new_buffer_len);
 
     if (!new_buffer) {
-        *perr = context_panic(ctx, ERROR_MEMORY,
+        *err = context_panic(ctx, ERROR_MEMORY,
             "failed allocating %zu bytes", new_buffer_len);
         return;
     }
@@ -619,9 +621,9 @@ static void httpget_grow_buffer(Context *ctx, HttpGet *req, Error *perr)
 }
 
 
-static void httpget_grow_headers(Context *ctx, HttpGet *req, Error *perr)
+static void httpget_grow_headers(Context *ctx, HttpGet *req, Error *err)
 {
-    if (*perr)
+    if (*err)
         return;
 
     size_t old_max = req->header_capacity;
@@ -634,7 +636,7 @@ static void httpget_grow_headers(Context *ctx, HttpGet *req, Error *perr)
     HttpHeader *new_headers = realloc(old_headers, size);
 
     if (!new_headers) {
-        *perr = context_panic(ctx, ERROR_MEMORY,
+        *err = context_panic(ctx, ERROR_MEMORY,
             "failed allocating %zu bytes", size);
         return;
     }
@@ -645,9 +647,9 @@ static void httpget_grow_headers(Context *ctx, HttpGet *req, Error *perr)
 
 
 static void assert_ascii(Context *ctx, const uint8_t *str, size_t str_len,
-                         Error *perr)
+                         Error *err)
 {
-    if (*perr)
+    if (*err)
         return;
 
     uint8_t ch;
@@ -657,7 +659,7 @@ static void assert_ascii(Context *ctx, const uint8_t *str, size_t str_len,
     for (ptr = str; ptr < end; ptr++) {
         ch = *ptr;
         if (ch == 0 || ch > 0x7F) {
-            *perr = context_panic(ctx, ERROR_VALUE,
+            *err = context_panic(ctx, ERROR_VALUE,
                 "invalid ASCII code byte 0x%02x in position %zu:"
                 " value not between 0x01 and 0x7f",
                 (unsigned)ch, (size_t)(ptr - str));
@@ -668,14 +670,14 @@ static void assert_ascii(Context *ctx, const uint8_t *str, size_t str_len,
 
 
 static void httpget_set_status(Context *ctx, HttpGet *req, uint8_t *line,
-                               size_t line_len, Error *perr)
+                               size_t line_len, Error *err)
 {
-    if (*perr)
+    if (*err)
         return;
 
-    assert_ascii(ctx, line, line_len, perr);
-    if (*perr) {
-        context_panic(ctx, *perr, "invalid HTTP status line: %s",
+    assert_ascii(ctx, line, line_len, err);
+    if (*err) {
+        context_panic(ctx, *err, "invalid HTTP status line: %s",
                       context_message(ctx));
         return;
     }
@@ -684,22 +686,22 @@ static void httpget_set_status(Context *ctx, HttpGet *req, uint8_t *line,
 
 
 static void httpget_add_header(Context *ctx, HttpGet *req, uint8_t *line,
-                               size_t line_len, Error *perr)
+                               size_t line_len, Error *err)
 {
-    if (*perr)
+    if (*err)
         return;
 
     if (req->header_count == req->header_capacity) {
-        httpget_grow_headers(ctx, req, perr);
-        if (*perr)
+        httpget_grow_headers(ctx, req, err);
+        if (*err)
             return;
     }
 
     size_t i = req->header_count;
 
-    assert_ascii(ctx, line, line_len, perr);
-    if (*perr) {
-        context_panic(ctx, *perr,
+    assert_ascii(ctx, line, line_len, err);
+    if (*err) {
+        context_panic(ctx, *err,
             "invalid HTTP header line in position %zu: %s",
             i + 1,
             context_message(ctx));
@@ -709,7 +711,7 @@ static void httpget_add_header(Context *ctx, HttpGet *req, uint8_t *line,
     char *key = (char *)line;
     char *colon = strstr(key, ":");
     if (!colon) {
-        *perr = context_panic(ctx, ERROR_VALUE,
+        *err = context_panic(ctx, ERROR_VALUE,
             "invalid HTTP header line in position %zu: %s",
             i + 1,
             "missing colon (:)");
@@ -733,9 +735,9 @@ static void httpget_add_header(Context *ctx, HttpGet *req, uint8_t *line,
 }
 
 
-static bool httpget_start(Context *ctx, HttpGet *req, Error *perr)
+static bool httpget_start(Context *ctx, HttpGet *req, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
     memset(&req->hints, 0, sizeof(req->hints));
@@ -750,18 +752,18 @@ static bool httpget_start(Context *ctx, HttpGet *req, Error *perr)
 }
 
 
-static bool httpget_getaddr(Context *ctx, HttpGet *req, Error *perr)
+static bool httpget_getaddr(Context *ctx, HttpGet *req, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
-    if (task_blocked(ctx, &req->getaddr.task, perr)) {
+    if (task_blocked(ctx, &req->getaddr.task, err)) {
         req->task.block = req->getaddr.task.block;
         return true;
     }
 
-    if (*perr) {
-        context_panic(ctx, *perr,
+    if (*err) {
+        context_panic(ctx, *err,
             "failed getting host address information: %s",
             context_message(ctx));
         return false;
@@ -776,9 +778,9 @@ static bool httpget_getaddr(Context *ctx, HttpGet *req, Error *perr)
 }
 
 
-static bool httpget_open(Context *ctx, HttpGet *req, Error *perr)
+static bool httpget_open(Context *ctx, HttpGet *req, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
     assert(req->addrinfo);
@@ -797,8 +799,9 @@ static bool httpget_open(Context *ctx, HttpGet *req, Error *perr)
 
     if (req->sockfd < 0) {
         int status = errno;
-        *perr = context_panic(ctx, error_code(status),
+        *err = context_panic(ctx, error_code(status),
             "failed opening socket: %s", strerror(status));
+        return false;
     }
 
     int flags = fcntl(req->sockfd, F_GETFL, 0);
@@ -816,28 +819,30 @@ static bool httpget_open(Context *ctx, HttpGet *req, Error *perr)
 }
 
 
-static bool httpget_connect(Context *ctx, HttpGet *req, Error *perr)
+static bool httpget_connect(Context *ctx, HttpGet *req, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
-    if (task_blocked(ctx, &req->conn.task, perr)) {
+    if (task_blocked(ctx, &req->conn.task, err)) {
         req->task.block = req->conn.task.block;
         return true;
     }
 
-    if (*perr) {
+    if (*err == ERROR_INTERRUPT) { // hide this??
+        return false;
+    } else if (*err) {
         req->addrinfo = req->addrinfo->ai_next;
         if (req->addrinfo) {
+            *err = 0;
             sockconnect_deinit(ctx, &req->conn);
             close(req->sockfd);
             req->state = HTTPGET_OPEN;
             return false;
         }
 
-        context_panic(ctx, *perr,
-            "failed connecting to host: %s",
-            context_message(ctx));
+        context_panic(ctx, *err, "failed connecting to host: %s",
+                      context_message(ctx));
         return false;
     }
 
@@ -851,7 +856,7 @@ static bool httpget_connect(Context *ctx, HttpGet *req, Error *perr)
 
         req->buffer = malloc(buffer_len);
         if (!req->buffer) {
-            *perr = context_panic(ctx, ERROR_MEMORY,
+            *err = context_panic(ctx, ERROR_MEMORY,
                 "failed allocating %d bytes", buffer_len);
             return false;
         }
@@ -869,18 +874,18 @@ static bool httpget_connect(Context *ctx, HttpGet *req, Error *perr)
 }
 
 
-static bool httpget_send(Context *ctx, HttpGet *req, Error *perr)
+static bool httpget_send(Context *ctx, HttpGet *req, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
-    if (task_blocked(ctx, &req->send.task, perr)) {
+    if (task_blocked(ctx, &req->send.task, err)) {
         req->task.block = req->send.task.block;
         return true;
     }
 
-    if (*perr) {
-        context_panic(ctx, *perr,
+    if (*err) {
+        context_panic(ctx, *err,
             "failed sending to host: %s",
             context_message(ctx));
         return false;
@@ -899,18 +904,18 @@ static bool httpget_send(Context *ctx, HttpGet *req, Error *perr)
 }
 
 
-static bool httpget_meta(Context *ctx, HttpGet *req, Error *perr)
+static bool httpget_meta(Context *ctx, HttpGet *req, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
-    if (task_blocked(ctx, &req->recv.task, perr)) {
+    if (task_blocked(ctx, &req->recv.task, err)) {
         req->task.block = req->recv.task.block;
         return true;
     }
 
-    if (*perr) {
-        context_panic(ctx, *perr,
+    if (*err) {
+        context_panic(ctx, *err,
             "failed receiving status from host: %s",
             context_message(ctx));
         return false;
@@ -937,24 +942,20 @@ static bool httpget_meta(Context *ctx, HttpGet *req, Error *perr)
             empty_line = true;
             break;
         } else if (!req->status) { // status
-            httpget_set_status(ctx, req, line, line_len, perr);
-            if (*perr)
+            httpget_set_status(ctx, req, line, line_len, err);
+            if (*err)
                 return false;
-            printf("status: `%s`\n", req->status);
         } else {
-            httpget_add_header(ctx, req, line, line_len, perr);
-            if (*perr)
+            httpget_add_header(ctx, req, line, line_len, err);
+            if (*err)
                 return false;
-            printf("header: `%s`: `%s`\n",
-                   req->headers[req->header_count - 1].key,
-                   req->headers[req->header_count - 1].value);
         }
     }
 
     if (req->data_max - req->data_len < BUFFER_MIN) {
         printf("growing buffer\n");
-        httpget_grow_buffer(ctx, req, perr);
-        if (*perr)
+        httpget_grow_buffer(ctx, req, err);
+        if (*err)
             return false;
     }
 
@@ -970,9 +971,9 @@ static bool httpget_meta(Context *ctx, HttpGet *req, Error *perr)
 }
 
 
-bool httpget_blocked(Context *ctx, Task *task, Error *perr)
+bool httpget_blocked(Context *ctx, Task *task, Error *err)
 {
-    if (*perr)
+    if (*err)
         return false;
 
     HttpGet *req = (HttpGet *)task;
@@ -980,32 +981,32 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
     while (true) {
         switch (req->state) {
         case HTTPGET_START:
-            if (httpget_start(ctx, req, perr))
+            if (httpget_start(ctx, req, err))
                 return true;
             break;
 
         case HTTPGET_GETADDR:
-            if (httpget_getaddr(ctx, req, perr))
+            if (httpget_getaddr(ctx, req, err))
                 return true;
             break;
 
         case HTTPGET_OPEN:
-            if (httpget_open(ctx, req, perr))
+            if (httpget_open(ctx, req, err))
                 return true;
             break;
 
         case HTTPGET_CONNECT:
-            if (httpget_connect(ctx, req, perr))
+            if (httpget_connect(ctx, req, err))
                 return true;
             break;
 
         case HTTPGET_SEND:
-            if (httpget_send(ctx, req, perr))
+            if (httpget_send(ctx, req, err))
                 return true;
             break;
 
         case HTTPGET_META:
-            if (httpget_meta(ctx, req, perr))
+            if (httpget_meta(ctx, req, err))
                 return true;
             break;
 
@@ -1020,7 +1021,7 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
     exit(0);
     printf("body finished\n");
 
-    if (task_blocked(ctx, &req->recv.task, perr)) {
+    if (task_blocked(ctx, &req->recv.task, err)) {
         task->block = req->recv.task.block;
         if (req->recv.nrecv > 0) {
             printf("read %d bytes:\n", (int)req->recv.nrecv);
@@ -1034,8 +1035,8 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
         return true;
     }
 
-    if (*perr) {
-        context_panic(ctx, *perr,
+    if (*err) {
+        context_panic(ctx, *err,
             "failed receiving from host: %s",
             context_message(ctx));
         return false;
@@ -1056,13 +1057,13 @@ bool httpget_blocked(Context *ctx, Task *task, Error *perr)
     printf("recv finished\n");
 shutdown:
     printf("shutdown started\n");
-    if (task_blocked(ctx, &req->shutdown.task, perr)) {
+    if (task_blocked(ctx, &req->shutdown.task, err)) {
         task->block = req->shutdown.task.block;
         return true;
     }
 
-    if (*perr) {
-        context_panic(ctx, *perr,
+    if (*err) {
+        context_panic(ctx, *err,
             "failed shutting down connection to host: %s",
             context_message(ctx));
         return false;
@@ -1119,26 +1120,6 @@ void httpget_deinit(Context *ctx, HttpGet *req)
 }
 
 
-bool httpget_header(Context *ctx, HttpGet *req, Error *perr)
-{
-    if (*perr)
-        return false;
-    (void)ctx;
-    (void)req;
-    return false;
-}
-
-
-bool httpget_content(Context *ctx, HttpGet *req, Error *perr)
-{
-    if (*perr)
-        return false;
-    (void)ctx;
-    (void)req;
-    return false;
-}
-
-
 int main(int argc, const char **argv)
 {
     (void)argc;
@@ -1159,6 +1140,12 @@ int main(int argc, const char **argv)
     if (err)
         goto exit;
 
+    printf("status: `%s`\n", req.status);
+    size_t i, n = req.header_count;
+    for (i = 0; i < n; i++) {
+        printf("header: `%s`: `%s`\n",
+               req.headers[i].key, req.headers[i].value);
+    }
     // headers
 
     /*

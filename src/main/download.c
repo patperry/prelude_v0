@@ -111,6 +111,37 @@ void context_code(Context *ctx, int errnum)
     }
 }
 
+void *memory_realloc(Context *ctx, void *buffer, size_t old_len, size_t new_len)
+{
+    (void)old_len;
+
+    if (ctx->error)
+        return buffer;
+
+    if (new_len == 0) {
+        free(buffer);
+        return NULL;
+    }
+
+    void *new_buffer = realloc(buffer, new_len);
+
+    if (!new_buffer) {
+        if (new_len > old_len) {
+            context_panic(ctx, ERROR_MEMORY, "failed allocating %zu bytes",
+                          new_len);
+        }
+        return buffer;
+    }
+
+    return new_buffer;
+}
+
+
+void *memory_alloc(Context *ctx, size_t size)
+{
+    return memory_realloc(ctx, NULL, 0, size);
+}
+
 
 typedef enum {
     IO_READ = 1 << 0,
@@ -611,18 +642,16 @@ static void httpget_grow_buffer(Context *ctx, HttpGet *req)
     if (ctx->error)
         return;
 
-    size_t old_buffer_len = req->buffer_len;
     char *old_buffer = req->buffer;
+    size_t old_buffer_len = req->buffer_len;
     size_t new_buffer_len = old_buffer_len * 2; // overflow?
-    char *new_buffer = realloc(old_buffer, new_buffer_len);
 
-    if (!new_buffer) {
-        context_panic(ctx, ERROR_MEMORY, "failed allocating %zu bytes",
-                      new_buffer_len);
+    req->buffer = memory_realloc(ctx, req->buffer, req->buffer_len,
+                                 new_buffer_len);
+    if (ctx->error)
         return;
-    }
 
-    req->buffer = new_buffer;
+    char *new_buffer = req->buffer;
     req->buffer_len = new_buffer_len;
     req->data = (uint8_t *)new_buffer + (req->data - (uint8_t *)old_buffer);
     req->data_max += new_buffer_len - old_buffer_len;
@@ -646,20 +675,16 @@ static void httpget_grow_headers(Context *ctx, HttpGet *req)
         return;
 
     size_t old_max = req->header_capacity;
-    size_t new_max = old_max * 2;
+    size_t new_max = old_max * 2; // TODO: overflow
     if (new_max == 0) {
         new_max = 32;
     }
-    HttpHeader *old_headers = req->headers;
-    size_t size = new_max * sizeof(*old_headers);
-    HttpHeader *new_headers = realloc(old_headers, size);
-
-    if (!new_headers) {
-        context_panic(ctx, ERROR_MEMORY, "failed allocating %zu bytes", size);
+    size_t old_size = old_max * sizeof(*req->headers);
+    size_t new_size = new_max * sizeof(*req->headers);
+    req->headers = memory_realloc(ctx, req->headers, old_size, new_size);
+    if (ctx->error)
         return;
-    }
 
-    req->headers = new_headers;
     req->header_capacity = new_max;
 }
 
@@ -862,12 +887,9 @@ static bool httpget_connect(Context *ctx, HttpGet *req)
         if (buffer_len < BUFFER_MIN)
             buffer_len = BUFFER_MIN;
 
-        req->buffer = malloc(buffer_len);
-        if (!req->buffer) {
-            context_panic(ctx, ERROR_MEMORY, "failed allocating %d bytes",
-                          buffer_len);
+        req->buffer = memory_alloc(ctx, buffer_len);
+        if (ctx->error)
             return false;
-        }
         req->buffer_len = buffer_len;
     }
 

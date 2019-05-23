@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -17,10 +18,13 @@
 #include <time.h>
 #include <unistd.h>
 
+/* https://stackoverflow.com/a/10269766/6233565 */
+#define container_of(ptr, type, member) \
+    ((type *) ((char *)(ptr) - offsetof(type, member)))
 
 // https://people.eecs.berkeley.edu/~sangjin/2012/12/21/epoll-vs-kqueue.html
 
-#define BUFFER_MIN 4096
+#define BUFFER_LEN 4096
 
 typedef enum {
     ERROR_NONE = 0,
@@ -608,6 +612,13 @@ typedef struct {
 
 typedef struct {
     Task task;
+    uint8_t *data;
+    size_t data_len;
+} HttpBody;
+
+
+typedef struct {
+    Task task;
     HttpGetState state;
     const char *host;
     const char *target;
@@ -628,23 +639,46 @@ typedef struct {
     size_t header_count;
     size_t header_capacity;
 
+    size_t content_length;
+    size_t content_read;
+    bool content_started;
+
+    HttpBody current;
+
     void *buffer;
     uint8_t *data;
 
     size_t buffer_len;
     size_t data_len;
     size_t data_max;
+
 } HttpGet;
 
 
-static void httpget_grow_buffer(Context *ctx, HttpGet *req)
+static void httpget_grow_buffer(Context *ctx, HttpGet *req, size_t add)
 {
-    if (ctx->error)
+    if (ctx->error || add == 0)
         return;
 
     char *old_buffer = req->buffer;
     size_t old_buffer_len = req->buffer_len;
-    size_t new_buffer_len = old_buffer_len * 2; // overflow?
+    size_t new_buffer_len;
+
+    if (old_buffer_len / 2 > SIZE_MAX || old_buffer_len > SIZE_MAX - add) {
+        context_panic(ctx, ERROR_OVERFLOW,
+                      "buffer size exceeds maximum (%zu)", SIZE_MAX);
+        return;
+    }
+   
+    if (add > old_buffer_len) {
+        new_buffer_len = old_buffer_len + add;
+    } else {
+        new_buffer_len = 2 * old_buffer_len;
+    }
+
+    if (new_buffer_len <= 32) {
+        new_buffer_len = 32;
+    }
 
     req->buffer = memory_realloc(ctx, req->buffer, req->buffer_len,
                                  new_buffer_len);
@@ -669,16 +703,29 @@ static void httpget_grow_buffer(Context *ctx, HttpGet *req)
 }
 
 
-static void httpget_grow_headers(Context *ctx, HttpGet *req)
+static void httpget_grow_headers(Context *ctx, HttpGet *req, size_t add)
 {
-    if (ctx->error)
+    if (ctx->error || add == 0)
         return;
 
     size_t old_max = req->header_capacity;
-    size_t new_max = old_max * 2; // TODO: overflow
-    if (new_max == 0) {
+    if (old_max / 2 > SIZE_MAX || old_max > SIZE_MAX - add) {
+        context_panic(ctx, ERROR_OVERFLOW,
+                      "header count exceeds maximum (%zu)", SIZE_MAX);
+        return;
+    }
+    
+    size_t new_max;
+    if (add > old_max) {
+        new_max = old_max + add;
+    } else {
+        new_max = old_max * 2;
+    }
+
+    if (new_max <= 32) {
         new_max = 32;
     }
+
     size_t old_size = old_max * sizeof(*req->headers);
     size_t new_size = new_max * sizeof(*req->headers);
     req->headers = memory_realloc(ctx, req->headers, old_size, new_size);
@@ -734,7 +781,7 @@ static void httpget_add_header(Context *ctx, HttpGet *req, uint8_t *line,
         return;
 
     if (req->header_count == req->header_capacity) {
-        httpget_grow_headers(ctx, req);
+        httpget_grow_headers(ctx, req, 1);
         if (ctx->error)
             return;
     }
@@ -881,17 +928,15 @@ static bool httpget_connect(Context *ctx, HttpGet *req)
 
     // send request
     const char *format = "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n";
-    {
-        size_t buffer_len =
-            (size_t)snprintf(NULL, 0, format, req->target, req->host) + 1;
-        if (buffer_len < BUFFER_MIN)
-            buffer_len = BUFFER_MIN;
+    size_t buffer_len =
+        (size_t)snprintf(NULL, 0, format, req->target, req->host) + 1;
 
-        req->buffer = memory_alloc(ctx, buffer_len);
-        if (ctx->error)
-            return false;
-        req->buffer_len = buffer_len;
-    }
+    if (buffer_len < BUFFER_LEN)
+        buffer_len = BUFFER_LEN;
+
+    httpget_grow_buffer(ctx, req, buffer_len);
+    if (ctx->error)
+        return false;
 
     snprintf(req->buffer, req->buffer_len, format, req->target, req->host);
     socksend_init(ctx, &req->send, req->sockfd, req->buffer,
@@ -918,7 +963,8 @@ static bool httpget_send(Context *ctx, HttpGet *req)
     req->data_len = 0;
     req->data_max = req->buffer_len;
 
-    sockrecv_init(ctx, &req->recv, req->sockfd, req->data, req->data_max, 0);
+    assert(req->data_max >= BUFFER_LEN);
+    sockrecv_init(ctx, &req->recv, req->sockfd, req->data, BUFFER_LEN, 0);
 
     printf("send finished\n");
     printf("meta started\n");
@@ -937,18 +983,12 @@ static bool httpget_meta(Context *ctx, HttpGet *req)
         return true;
     }
 
-    if (ctx->error)
-        return false;
-
     req->data_len += req->recv.nrecv;
 
     uint8_t *line_end;
     bool empty_line = false;
 
     while ((line_end = memmem(req->data, req->data_len, "\r\n", 2))) {
-        if (ctx->error)
-            return false;
-
         *line_end = '\0';
         uint8_t *line = req->data;
         size_t line_len = line_end - line;
@@ -968,22 +1008,169 @@ static bool httpget_meta(Context *ctx, HttpGet *req)
         }
     }
 
-    if (req->data_max - req->data_len < BUFFER_MIN) {
-        httpget_grow_buffer(ctx, req);
-    }
-
-    sockrecv_reinit(ctx, &req->recv, req->sockfd, req->data + req->data_len,
-                    req->data_max - req->data_len, 0);
-
-    if (ctx->error)
-        return false;
-
     if (empty_line) {
-        printf("meta finished\n");
         req->state = HTTPGET_FINISH;
+        printf("meta finished\n");
+    } else {
+        size_t empty = req->data_max - req->data_len; 
+        if (empty < BUFFER_LEN) {
+            httpget_grow_buffer(ctx, req, BUFFER_LEN - empty);
+        }
+
+        sockrecv_reinit(ctx, &req->recv, req->sockfd,
+                        req->data + req->data_len, BUFFER_LEN, 0);
     }
 
     return false;
+}
+
+
+static bool httpbody_blocked(Context *ctx, Task *task)
+{
+    if (ctx->error)
+        return false;
+
+    HttpBody *body = (HttpBody *)task;
+    HttpGet *req = container_of(body, HttpGet, current);
+
+    Task *work;
+    if (req->content_read < req->content_length) {
+        work = &req->recv.task;
+    } else {
+        work = &req->shutdown.task;
+    }
+
+    if (task_blocked(ctx, work)) {
+        body->task.block = work->block;
+        return true;
+    }
+
+    body->task.block.type = BLOCK_NONE;
+    return false;
+}
+
+
+static void httpbody_init(Context *ctx, HttpBody *body)
+{
+    memset(body, 0, sizeof(*body));
+    if (ctx->error)
+        return;
+    body->task._blocked = httpbody_blocked;
+}
+
+
+static void httpbody_deinit(Context *ctx, HttpBody *body)
+{
+    (void)ctx;
+    (void)body;
+}
+
+
+bool httpget_advance(Context *ctx, HttpGet *req)
+{
+    if (ctx->error)
+        return false;
+
+    assert(req->state == HTTPGET_FINISH);
+
+    size_t tail_len = req->content_length - req->content_read;
+    if (tail_len == 0)
+        return false;
+
+    size_t data_len;
+
+    if (!req->content_started) {
+        req->current.data = req->data;
+        data_len = req->data_len;
+    } else {
+        req->current.data = req->recv.buffer;
+        data_len = req->recv.nrecv;
+    }
+
+    if (data_len > tail_len) {
+        data_len = tail_len;
+    }
+    req->current.data_len = data_len;
+    req->content_read += data_len;
+
+    tail_len = req->content_length - req->content_read;
+
+    if (tail_len) {
+        void *buffer;
+        void *tail = req->data + (req->data_max - BUFFER_LEN);
+        if (!req->content_started || req->recv.buffer < tail) {
+            buffer = tail;
+        } else {
+            buffer = req->data;
+        }
+        size_t buffer_len = tail_len > BUFFER_LEN ? BUFFER_LEN : tail_len;
+        sockrecv_reinit(ctx, &req->recv, req->sockfd, buffer, buffer_len, 0);
+    } else {
+        sockshutdown_init(ctx, &req->shutdown, req->sockfd, SHUT_RDWR);
+    }
+
+    req->content_started = true;
+    return true;
+}
+
+
+static void httpget_finish(Context *ctx, HttpGet *req)
+{
+    if (ctx->error)
+        return;
+
+    req->task.block.type = BLOCK_NONE;
+
+    if (!req->status) {
+        context_panic(ctx, ERROR_VALUE, "missing HTTP status line");
+        return;
+    }
+
+    bool has_content_length = false;
+    size_t i, n = req->header_count;
+    const HttpHeader *header;
+
+    for (i = 0; i < n; i++) {
+        header = &req->headers[i];
+        if (strcmp(header->key, "Content-Length") == 0) {
+            has_content_length = true;
+            break;
+        }
+    }
+
+    if (!has_content_length) {
+        context_panic(ctx, ERROR_VALUE, "missing HTTP `Content-Length` header");
+        return;
+    }
+
+    char *end;
+    errno = 0;
+    intmax_t content_length = strtoimax(header->value, &end, 10);
+
+    if (*end != '\0' || content_length < 0) {
+        context_panic(ctx, ERROR_VALUE,
+                      "invalid HTTP `Content-Length` value: `%s`",
+                      header->value);
+    } else if (errno == ERANGE) {
+        context_panic(ctx, ERROR_OVERFLOW,
+                      "HTTP `Content-Length` value `%s`"
+                      " exceeds maximum (%"PRIdMAX")",
+                      header->value, INTMAX_MAX);
+    } else {
+        assert(SIZE_MAX >= INTMAX_MAX);
+        req->content_length = (size_t)content_length;
+        httpbody_init(ctx, &req->current);
+    }
+
+    size_t required = BUFFER_LEN;
+    if (req->data_len <= BUFFER_LEN) {
+        required += (BUFFER_LEN - req->data_len);
+    }
+
+    size_t available = req->data_max - req->data_len;
+    if (available < required) {
+        httpget_grow_buffer(ctx, req, required - available);
+    }
 }
 
 
@@ -1023,6 +1210,7 @@ bool httpget_blocked(Context *ctx, Task *task)
             break;
 
         case HTTPGET_FINISH:
+            httpget_finish(ctx, req);
             return false;
         }
 
@@ -1030,68 +1218,6 @@ bool httpget_blocked(Context *ctx, Task *task)
             return true;
     }
 }
-
-/*
-  body:
-    exit(0);
-    printf("body finished\n");
-
-    if (task_blocked(ctx, &req->recv.task, err)) {
-        task->block = req->recv.task.block;
-        if (req->recv.nrecv > 0) {
-            printf("read %d bytes:\n", (int)req->recv.nrecv);
-            printf("----------------------------------------\n");
-            printf("%.*s", (int)req->recv.nrecv, (char *)req->buffer);
-            printf("\n----------------------------------------\n");
-
-            sockrecv_reset(ctx, &req->recv,
-                           req->buffer, sizeof(req->buffer), 0);
-        }
-        return true;
-    }
-
-    if (*err) {
-        context_panic(ctx, *err,
-            "failed receiving from host: %s",
-            context_message(ctx));
-        return false;
-    }
-
-    if (req->recv.nrecv > 0) {
-        printf("read %d bytes:\n", (int)req->recv.nrecv);
-        printf("----------------------------------------\n");
-        printf("%.*s", (int)req->recv.nrecv, (char *)req->buffer);
-        printf("\n----------------------------------------\n");
-        sockrecv_reset(ctx, &req->recv, req->buffer, sizeof(req->buffer), 0);
-        goto body;
-    }
-
-    sockshutdown_init(ctx, &req->shutdown, req->sockfd, SHUT_RDWR);
-    req->state = HTTPGET_SHUTDOWN;
-
-    printf("recv finished\n");
-shutdown:
-    printf("shutdown started\n");
-    if (task_blocked(ctx, &req->shutdown.task, err)) {
-        task->block = req->shutdown.task.block;
-        return true;
-    }
-
-    if (*err) {
-        context_panic(ctx, *err,
-            "failed shutting down connection to host: %s",
-            context_message(ctx));
-        return false;
-    }
-
-    printf("shutdown finished\n");
-    req->state = HTTPGET_FINISH;
-    task->block.type = BLOCK_NONE;
-
-finish:
-    return false;
-}
-*/
 
 
 void httpget_init(Context *ctx, HttpGet *req, const char *host,
@@ -1113,6 +1239,8 @@ void httpget_deinit(Context *ctx, HttpGet *req)
 {
     switch (req->state) {
     case HTTPGET_FINISH:
+        httpbody_deinit(ctx, &req->current);
+
     case HTTPGET_META:
         sockrecv_deinit(ctx, &req->recv);
 
@@ -1162,16 +1290,16 @@ int main(int argc, const char **argv)
         printf("header: `%s`: `%s`\n",
                req.headers[i].key, req.headers[i].value);
     }
-    // headers
 
-    /*
-    while (httpget_advance(&ctx, &req, &err)) {
-        task_await(&ctx, &req.current.task, &err);
-        if (err)
-            goto exit;
-        // body
+    printf("content-length: %zu\n", req.content_length);
+
+    while (httpget_advance(&ctx, &req)) {
+        task_await(&ctx, &req.current.task);
+        printf("read %d bytes:\n", (int)req.current.data_len);
+        printf("----------------------------------------\n");
+        printf("%.*s", (int)req.current.data_len, (char *)req.current.data);
+        printf("\n----------------------------------------\n");
     }
-    */
 
 exit:
     if (ctx.error) {

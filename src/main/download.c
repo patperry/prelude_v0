@@ -237,52 +237,6 @@ void sockrecv_deinit(Context *ctx, SockRecv *req)
 }
 
 
-typedef struct {
-    Task task;
-    Socket *socket;
-    int how;
-} SockShutdown;
-
-
-bool sockshutdown_blocked(Context *ctx, Task *task)
-{
-    if (ctx->error)
-        return false;
-
-    SockShutdown *req = (SockShutdown *)task;
-    if (shutdown(req->socket->fd, req->how) < 0) {
-        int status = errno;
-        if (status != ENOTCONN) { // peer closed the connection
-            assert(status);
-            context_code(ctx, status);
-            context_panic(ctx, ctx->error,
-                          "failed shutting down connection to peer: %s",
-                          ctx->message);
-        }
-    }
-
-    return false;
-}
-
-
-void sockshutdown_init(Context *ctx, SockShutdown *req, Socket *socket,
-                       int how)
-{
-    memset(req, 0, sizeof(*req));
-    if (ctx->error)
-        return;
-
-    req->task._blocked = sockshutdown_blocked;
-    req->socket = socket;
-    req->how = how;
-}
-
-
-void sockshutdown_deinit(Context *ctx, SockShutdown *req)
-{
-    (void)ctx;
-    (void)req;
-}
 
 
 typedef enum {
@@ -323,7 +277,7 @@ typedef struct {
     SocketConnect conn;
     SockSend send;
     SockRecv recv;
-    SockShutdown shutdown;
+    SocketShutdown shutdown;
 
     const char *status;
     size_t status_len;
@@ -794,7 +748,7 @@ bool httpget_advance(Context *ctx, HttpGet *req)
         size_t buffer_len = tail_len > BUFFER_LEN ? BUFFER_LEN : tail_len;
         sockrecv_reinit(ctx, &req->recv, &req->socket, buffer, buffer_len, 0);
     } else {
-        sockshutdown_init(ctx, &req->shutdown, &req->socket, SHUT_RDWR);
+        socketshutdown_init(ctx, &req->shutdown, &req->socket, SHUT_RDWR);
     }
 
     req->content_started = true;

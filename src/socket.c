@@ -9,6 +9,7 @@
 #include "prelude.h"
 
 static bool socketconnect_blocked(Context *ctx, Task *task);
+static bool socketshutdown_blocked(Context *ctx, Task *task);
 
 
 void socket_init(Context *ctx, Socket *sock, int domain, int type,
@@ -95,5 +96,46 @@ bool socketconnect_blocked(Context *ctx, Task *task)
 
 exit:
     req->task.block.type = BLOCK_NONE;
+    return false;
+}
+
+
+void socketshutdown_init(Context *ctx, SocketShutdown *req, Socket *socket,
+                         int how)
+{
+    memset(req, 0, sizeof(*req));
+    if (ctx->error)
+        return;
+
+    req->task._blocked = socketshutdown_blocked;
+    req->socket = socket;
+    req->how = how;
+}
+
+
+void socketshutdown_deinit(Context *ctx, SocketShutdown *req)
+{
+    (void)ctx;
+    (void)req;
+}
+
+
+bool socketshutdown_blocked(Context *ctx, Task *task)
+{
+    if (ctx->error)
+        return false;
+
+    SocketShutdown *req = (SocketShutdown *)task;
+    if (shutdown(req->socket->fd, req->how) < 0) {
+        int status = errno;
+        if (status != ENOTCONN) { // peer closed the connection
+            assert(status);
+            context_code(ctx, status);
+            context_panic(ctx, ctx->error,
+                          "failed shutting down connection to peer: %s",
+                          ctx->message);
+        }
+    }
+
     return false;
 }

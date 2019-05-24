@@ -417,10 +417,20 @@ typedef struct {
     bool started;
 } SocketConnect;
 
-
 void socketconnect_init(Context *ctx, SocketConnect *req, Socket *socket,
                         const struct sockaddr *address, int address_len);
 void socketconnect_deinit(Context *ctx, SocketConnect *conn);
+
+
+typedef struct {
+    Task task;
+    Socket *socket;
+    int how;
+} SocketShutdown;
+
+void socketshutdown_init(Context *ctx, SocketShutdown *req, Socket *socket,
+                         int how);
+void socketshutdown_deinit(Context *ctx, SocketShutdown *req);
 
 /**@}*/
 

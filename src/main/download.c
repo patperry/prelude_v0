@@ -732,7 +732,7 @@ static bool httpget_start(Context *ctx, HttpGet *req)
 }
 
 
-static bool httpget_getaddr(Context *ctx, HttpGet *req)
+static bool httpget_getaddr_blocked(Context *ctx, HttpGet *req)
 {
     if (ctx->error)
         return false;
@@ -751,7 +751,7 @@ static bool httpget_getaddr(Context *ctx, HttpGet *req)
 }
 
 
-static bool httpget_open(Context *ctx, HttpGet *req)
+static bool httpget_open_blocked(Context *ctx, HttpGet *req)
 {
     if (ctx->error)
         return false;
@@ -792,7 +792,7 @@ static bool httpget_open(Context *ctx, HttpGet *req)
 }
 
 
-static bool httpget_connect(Context *ctx, HttpGet *req)
+static bool httpget_connect_blocked(Context *ctx, HttpGet *req)
 {
     if (ctx->error)
         return false;
@@ -841,7 +841,7 @@ static bool httpget_connect(Context *ctx, HttpGet *req)
 }
 
 
-static bool httpget_send(Context *ctx, HttpGet *req)
+static bool httpget_send_blocked(Context *ctx, HttpGet *req)
 {
     if (ctx->error)
         return false;
@@ -865,7 +865,7 @@ static bool httpget_send(Context *ctx, HttpGet *req)
 }
 
 
-static bool httpget_meta(Context *ctx, HttpGet *req)
+static bool httpget_meta_blocked(Context *ctx, HttpGet *req)
 {
     if (ctx->error)
         return false;
@@ -1082,23 +1082,23 @@ bool httpget_blocked(Context *ctx, Task *task)
             break;
 
         case HTTPGET_GETADDR:
-            action = httpget_getaddr;
+            action = httpget_getaddr_blocked;
             break;
 
         case HTTPGET_OPEN:
-            action = httpget_open;
+            action = httpget_open_blocked;
             break;
 
         case HTTPGET_CONNECT:
-            action = httpget_connect;
+            action = httpget_connect_blocked;
             break;
 
         case HTTPGET_SEND:
-            action = httpget_send;
+            action = httpget_send_blocked;
             break;
 
         case HTTPGET_META:
-            action = httpget_meta;
+            action = httpget_meta_blocked;
             break;
 
         case HTTPGET_FINISH:

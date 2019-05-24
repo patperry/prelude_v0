@@ -396,6 +396,21 @@ typedef struct {
 /**@}*/
 
 /**
+ * \defgroup socket Sockets
+ */
+
+typedef struct {
+    int fd;
+} Socket;
+
+void socket_init(Context *ctx, Socket *sock, int domain, int type,
+                 int protocol);
+
+void socket_deinit(Context *ctx, Socket *sock);
+
+/**@}*/
+
+/**
  * \defgroup dns DNS utilities
  */
 
@@ -412,7 +427,6 @@ typedef struct {
 void getaddrinfo_init(Context *ctx, GetAddrInfo *req, const char *node,
                       const char *service, const struct addrinfo *hints);
 void getaddrinfo_deinit(Context *ctx, GetAddrInfo *req);
-
 
 /**@}*/
 

@@ -102,8 +102,55 @@ bool memory_equal(Context *ctx, const void *buf1, const void *buf2,
 
 void memory_copy(Context *ctx, void *buf, const void *src, size_t size);
 
+/**@}*/
+
 /**
- * \defgroup array Dynamic array
+ * \defgroup async Asynchronous Operations
+ * @{
+ */
+
+typedef enum {
+    IO_READ = 1 << 0,
+    IO_WRITE = 1 << 1
+} IOFlag;
+
+typedef struct {
+    int fd;
+    IOFlag flags;
+} BlockIO;
+
+typedef struct {
+    int millis;
+} BlockTimer;
+
+typedef enum {
+    BLOCK_NONE = 0,
+    BLOCK_IO,
+    BLOCK_TIMER
+} BlockType;
+
+typedef struct {
+    union {
+        BlockIO io;
+        BlockTimer timer;
+    } job;
+    BlockType type;
+} Block;
+
+
+typedef struct Task {
+    Block block;
+    bool (*_blocked)(Context *ctx, struct Task *task);
+} Task;
+
+bool task_blocked(Context *ctx, Task *task);
+bool task_advance(Context *ctx, Task *task);
+void task_await(Context *ctx, Task *task);
+
+/**@}*/
+
+/**
+ * \defgroup array Dynamic Array
  * @{
  */
 

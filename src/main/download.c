@@ -26,7 +26,6 @@
 
 
 
-
 int64_t clock_usec(clockid_t clock_id)
 {
     struct timespec tp;
@@ -34,38 +33,6 @@ int64_t clock_usec(clockid_t clock_id)
     return (int64_t)tp.tv_sec * 1000 * 1000 + tp.tv_nsec / 1000;
 }
 
-
-
-
-
-
-typedef enum {
-    IO_READ = 1 << 0,
-    IO_WRITE = 1 << 1
-} IOFlag;
-
-typedef struct {
-    int fd;
-    IOFlag flags;
-} BlockIO;
-
-typedef struct {
-    int millis;
-} BlockTimer;
-
-typedef enum {
-    BLOCK_NONE = 0,
-    BLOCK_IO,
-    BLOCK_TIMER
-} BlockType;
-
-typedef struct {
-    union {
-        BlockIO io;
-        BlockTimer timer;
-    } job;
-    BlockType type;
-} Block;
 
 /*
  * epoll
@@ -89,90 +56,33 @@ typedef struct {
  */
 
 
-typedef struct Task {
-    Block block;
-    bool (*_blocked)(Context *ctx, struct Task *task);
-} Task;
 
 
-bool task_blocked(Context *ctx, Task *task)
+/*
+typedef struct {
+    int (*_read) (Context *ctx, Stream *stream, void *buffer, int length);
+    int (*_write) (Context *ctx, Stream *stream, void *buffer, int length);
+} Stream;
+
+
+typedef struct {
+    Task task;
+    void *buffer;
+    int length;
+    int nread;
+} StreamRead;
+
+
+void streamread_init(Context *ctx, StreamRead *read, Stream *stream,
+                     void *buffer, int length)
 {
-    if (ctx->error)
-        return false;
-
-    return (task->_blocked)(ctx, task);
 }
 
 
-static void await_io(Context *ctx, BlockIO *block)
-{
-    if (ctx->error)
-        return;
-
-    struct pollfd fds[1];
-    fds[0].fd = block->fd;
-    fds[0].events = 0;
-
-    if (block->flags & IO_READ) {
-        fds[0].events |= POLLIN;
-    }
-    if (block->flags & IO_WRITE) {
-        fds[0].events |= POLLOUT;
-    }
-    fds[0].revents = 0;
-
-    if (poll(fds, 1, -1) < 0) {
-        context_code(ctx, errno);
-    }
-}
-
-
-static void await_timer(Context *ctx, BlockTimer *block)
-{
-    if (ctx->error)
-        return;
-
-    if (poll(NULL, 0, block->millis) < 0) {
-        int status = errno;
-        context_code(ctx, status);
-    }
-}
-
-
-bool task_advance(Context *ctx, Task *task)
-{
-    if (ctx->error)
-        return false;
-
-    if (!task_blocked(ctx, task)) {
-        return false;
-    }
-
-    log_debug(ctx, "blocked. waiting...");
-    switch (task->block.type) {
-    case BLOCK_NONE:
-        break;
-    case BLOCK_IO:
-        await_io(ctx, &task->block.job.io);
-        break;
-    case BLOCK_TIMER:
-        await_timer(ctx, &task->block.job.timer);
-        break;
-    }
-
-    return true;
-}
-
-
-void task_await(Context *ctx, Task *task)
-{
-    if (ctx->error)
-        return;
-
-    while (task_advance(ctx, task)) {
-        // pass
-    }
-}
+typedef struct {
+    Stream *base;
+} SocketStream;
+*/
 
 
 typedef struct {

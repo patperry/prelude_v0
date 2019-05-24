@@ -408,6 +408,20 @@ void socket_init(Context *ctx, Socket *sock, int domain, int type,
 
 void socket_deinit(Context *ctx, Socket *sock);
 
+
+typedef struct {
+    Task task;
+    Socket *socket;
+    const struct sockaddr *address;
+    int address_len;
+    bool started;
+} SocketConnect;
+
+
+void socketconnect_init(Context *ctx, SocketConnect *req, Socket *socket,
+                        const struct sockaddr *address, int address_len);
+void socketconnect_deinit(Context *ctx, SocketConnect *conn);
+
 /**@}*/
 
 /**

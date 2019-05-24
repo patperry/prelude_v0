@@ -85,73 +85,6 @@ typedef struct {
 */
 
 
-
-
-
-
-typedef struct {
-    Task task;
-    Socket *socket;
-    const struct sockaddr *address;
-    socklen_t address_len;
-    bool started;
-} SockConnect;
-
-
-bool sockconnect_blocked(Context *ctx, Task *task)
-{
-    if (ctx->error)
-        return false;
-
-    SockConnect *req = (SockConnect *)task;
-
-    if (connect(req->socket->fd, req->address, req->address_len) < 0) {
-        int status = errno;
-
-        if (!req->started) {
-            if (status == EINPROGRESS) {
-                req->task.block.type = BLOCK_IO;
-                req->task.block.job.io.fd = req->socket->fd;
-                req->task.block.job.io.flags = IO_WRITE;
-                req->started = true;
-                return true;
-            }
-        } else if (status == EALREADY || status == EINTR) {
-            return true;
-        } else if (status == EISCONN) {
-            goto exit;
-        }
-
-        assert(status);
-        context_code(ctx, status);
-        context_panic(ctx, ctx->error, "failed connecting to peer: %s",
-                      ctx->message);
-    }
-
-exit:
-    req->task.block.type = BLOCK_NONE;
-    return false;
-}
-
-
-void sockconnect_init(Context *ctx, SockConnect *req, Socket *socket,
-                      const struct sockaddr *address, socklen_t address_len)
-{
-    (void)ctx;
-    memset(req, 0, sizeof(*req));
-    req->task._blocked = sockconnect_blocked;
-    req->socket = socket;
-    req->address = address;
-    req->address_len = address_len;
-    req->started = false;
-}
-
-void sockconnect_deinit(Context *ctx, SockConnect *conn)
-{
-    (void)ctx;
-    (void)conn;
-}
-
 typedef struct {
     Task task;
     Socket *socket;
@@ -387,7 +320,7 @@ typedef struct {
     const struct addrinfo *addrinfo;
     Socket socket;
     bool has_socket;
-    SockConnect conn;
+    SocketConnect conn;
     SockSend send;
     SockRecv recv;
     SockShutdown shutdown;
@@ -644,7 +577,7 @@ static bool httpget_open_blocked(Context *ctx, HttpGet *req)
         return false;
     }
 
-    sockconnect_init(ctx, &req->conn, &req->socket, req->addrinfo->ai_addr,
+    socketconnect_init(ctx, &req->conn, &req->socket, req->addrinfo->ai_addr,
                      req->addrinfo->ai_addrlen);
 
     log_debug(ctx, "open finished");
@@ -669,7 +602,7 @@ static bool httpget_connect_blocked(Context *ctx, HttpGet *req)
 
         if (req->addrinfo) {
             context_recover(ctx);
-            sockconnect_deinit(ctx, &req->conn);
+            socketconnect_deinit(ctx, &req->conn);
             socket_deinit(ctx, &req->socket);
             req->has_socket = false;
             req->state = HTTPGET_OPEN;
@@ -1003,7 +936,7 @@ void httpget_deinit(Context *ctx, HttpGet *req)
         socksend_deinit(ctx, &req->send);
 
     case HTTPGET_CONNECT:
-        sockconnect_deinit(ctx, &req->conn);
+        socketconnect_deinit(ctx, &req->conn);
 
     case HTTPGET_OPEN:
         if (req->has_socket)

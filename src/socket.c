@@ -1,9 +1,14 @@
+#include <assert.h>
 #include <errno.h>
 #include <string.h>
+
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
 #include "prelude.h"
+
+static bool socketconnect_blocked(Context *ctx, Task *task);
 
 
 void socket_init(Context *ctx, Socket *sock, int domain, int type,
@@ -33,4 +38,62 @@ void socket_deinit(Context *ctx, Socket *sock)
     (void)ctx;
     if (sock->fd >= 0)
         close(sock->fd);
+}
+
+
+void socketconnect_init(Context *ctx, SocketConnect *req, Socket *socket,
+                        const struct sockaddr *address, int address_len)
+{
+    assert(address_len >= 0);
+    (void)ctx;
+    memset(req, 0, sizeof(*req));
+    req->task._blocked = socketconnect_blocked;
+    req->socket = socket;
+    req->address = address;
+    req->address_len = address_len;
+    req->started = false;
+}
+
+
+void socketconnect_deinit(Context *ctx, SocketConnect *conn)
+{
+    (void)ctx;
+    (void)conn;
+}
+
+
+bool socketconnect_blocked(Context *ctx, Task *task)
+{
+    if (ctx->error)
+        return false;
+
+    SocketConnect *req = (SocketConnect *)task;
+
+    if (connect(req->socket->fd, req->address,
+                (socklen_t)req->address_len) < 0) {
+        int status = errno;
+
+        if (!req->started) {
+            if (status == EINPROGRESS) {
+                req->task.block.type = BLOCK_IO;
+                req->task.block.job.io.fd = req->socket->fd;
+                req->task.block.job.io.flags = IO_WRITE;
+                req->started = true;
+                return true;
+            }
+        } else if (status == EALREADY || status == EINTR) {
+            return true;
+        } else if (status == EISCONN) {
+            goto exit;
+        }
+
+        assert(status);
+        context_code(ctx, status);
+        context_panic(ctx, ctx->error, "failed connecting to peer: %s",
+                      ctx->message);
+    }
+
+exit:
+    req->task.block.type = BLOCK_NONE;
+    return false;
 }

@@ -395,4 +395,25 @@ typedef struct {
 
 /**@}*/
 
+/**
+ * \defgroup dns DNS utilities
+ */
+
+struct addrinfo;
+
+typedef struct {
+    Task task;
+    const char *node;
+    const char *service;
+    const struct addrinfo *hints;
+    struct addrinfo *result;
+} GetAddrInfo;
+
+void getaddrinfo_init(Context *ctx, GetAddrInfo *req, const char *node,
+                      const char *service, const struct addrinfo *hints);
+void getaddrinfo_deinit(Context *ctx, GetAddrInfo *req);
+
+
+/**@}*/
+
 #endif /* PRELUDE_H */

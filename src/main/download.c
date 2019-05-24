@@ -85,52 +85,8 @@ typedef struct {
 */
 
 
-typedef struct {
-    Task task;
-    const char *node;
-    const char *service;
-    const struct addrinfo *hints;
-    struct addrinfo *result;
-} GetAddrInfo;
 
 
-bool getaddrinfo_blocked(Context *ctx, Task *task)
-{
-    if (ctx->error)
-        return false;
-
-    GetAddrInfo *req = (GetAddrInfo *)task;
-    int status = getaddrinfo(req->node, req->service, req->hints, &req->result);
-
-    if (status) {
-        context_panic(ctx, ERROR_OS, "failed getting address information: %s",
-                      gai_strerror(status));
-    }
-
-    return false;
-}
-
-
-void getaddrinfo_init(Context *ctx, GetAddrInfo *req, const char *node,
-                      const char *service, const struct addrinfo *hints)
-{
-    (void)ctx;
-    memset(req, 0, sizeof(*req));
-    req->task._blocked = getaddrinfo_blocked;
-    req->node = node;
-    req->service = service;
-    req->hints = hints;
-}
-
-
-void getaddrinfo_deinit(Context *ctx, GetAddrInfo *req)
-{
-    (void)ctx;
-
-    if (req->result) {
-        freeaddrinfo(req->result);
-    }
-}
 
 
 typedef struct {
@@ -140,6 +96,8 @@ typedef struct {
     socklen_t address_len;
     bool started;
 } SockConnect;
+
+
 
 
 bool sockconnect_blocked(Context *ctx, Task *task)

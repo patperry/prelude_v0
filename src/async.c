@@ -85,4 +85,3 @@ void await_timer(Context *ctx, BlockTimer *block)
         context_code(ctx, status);
     }
 }
-

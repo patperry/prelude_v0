@@ -1,15 +1,17 @@
 #include "prelude.h"
 
 
-static void textbuild_reserve(Context *ctx, TextBuild *build, int32_t extra,
-                              Error *perr)
+static void textbuild_reserve(Context *ctx, TextBuild *build, int32_t extra)
 {
+    if (ctx->error)
+        return;
+
     void *bytes = build->bytes;
     array_reserve(ctx, &bytes, sizeof(*build->bytes), &build->capacity,
-                  build->count, extra, perr);
-    if (!*perr) {
-        build->bytes = bytes;
-    }
+                  build->count, extra);
+    if (ctx->error)
+        return;
+    build->bytes = bytes;
 }
 
 
@@ -21,7 +23,8 @@ void textbuild_init(Context *ctx, TextBuild *build)
 
 void textbuild_clear(Context *ctx, TextBuild *build)
 {
-    (void)ctx;
+    if (ctx->error)
+        return;
     build->count = 0;
 }
 
@@ -38,7 +41,7 @@ Text textbuild_get(Context *ctx, TextBuild *build)
 
     memory_clear(ctx, &text, sizeof(text));
 
-    if (!context_error(ctx)) {
+    if (!ctx->error) {
         text.bytes = build->bytes;
         text.unescape = 0;
         text.size = (unsigned int)build->count;
@@ -50,7 +53,7 @@ Text textbuild_get(Context *ctx, TextBuild *build)
 
 void textbuild_text(Context *ctx, TextBuild *build, const Text *text)
 {
-    if (context_error(ctx))
+    if (ctx->error)
         return;
 
     TextIter it;
@@ -64,14 +67,13 @@ void textbuild_text(Context *ctx, TextBuild *build, const Text *text)
 
 void textbuild_char(Context *ctx, TextBuild *build, Char32 code)
 {
-    if (context_error(ctx))
+    if (ctx->error)
         return;
 
     int32_t extra = CHAR32_UTF8_COUNT(code);
-    Error err = ERROR_NONE;
 
-    textbuild_reserve(ctx, build, extra, &err);
-    if (err)
+    textbuild_reserve(ctx, build, extra);
+    if (ctx->error)
         return;
 
     uint8_t *end = build->bytes + build->count;

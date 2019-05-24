@@ -2,14 +2,17 @@
 
 
 void text_view(Context *ctx, Text *text, TextViewType flags,
-               const uint8_t *bytes, size_t size, Error *perr)
+               const uint8_t *bytes, size_t size)
 {
     memory_clear(ctx, text, sizeof(*text));
 
+    if (ctx->error)
+        return;
+
     if (size > (size_t)INT32_MAX) {
-        *perr = context_panic(ctx, ERROR_OVERFLOW, "text size (%zu bytes)"
-                              " exceeds maximum (%"PRId32" bytes)",
-                              size, INT32_MAX);
+        context_panic(ctx, ERROR_OVERFLOW, "text size (%zu bytes)"
+                      " exceeds maximum (%"PRId32" bytes)",
+                      size, INT32_MAX);
         return;
     }
 
@@ -24,16 +27,14 @@ void text_view(Context *ctx, Text *text, TextViewType flags,
             if (ch == '\\') {
                 unescape = true;
 
-                ptr = char_scan_escape(ctx, ptr, end, perr);
-                if (*perr) {
+                ptr = char_scan_escape(ctx, ptr, end);
+                if (ctx->error)
                     return;
-                }
             } else if (ch & 0x80) {
                 ptr--;
-                ptr = char_scan_utf8(ctx, ptr, end, perr);
-                if (*perr) {
+                ptr = char_scan_utf8(ctx, ptr, end);
+                if (ctx->error)
                     return;
-                }
             }
         }
     } else {
@@ -41,10 +42,9 @@ void text_view(Context *ctx, Text *text, TextViewType flags,
             ch = *ptr++;
             if (ch & 0x80) {
                 ptr--;
-                ptr = char_scan_utf8(ctx, ptr, end, perr);
-                if (*perr) {
+                ptr = char_scan_utf8(ctx, ptr, end);
+                if (ctx->error)
                     return;
-                }
             }
         }
     }

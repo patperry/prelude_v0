@@ -18,7 +18,6 @@ static const struct luaL_Reg context_m[] = {
 };
 
 static const luaL_Reg module_libs[] = {
-    {"socket", luaopen_socket},
     {"text", luaopen_text},
     {NULL, NULL}
 };
@@ -79,8 +78,8 @@ Context *lprelude_open(lua_State *L)
 
 void lprelude_close(lua_State *L, Context *ctx)
 {
-    if (context_error(ctx)) {
-        lua_pushstring(L, context_message(ctx));
+    if (ctx->error) {
+        lua_pushstring(L, ctx->message);
         context_recover(ctx);
         lua_error(L);
     }

@@ -30,8 +30,11 @@
 
 
 const uint8_t *char_scan_utf8(Context *ctx, const uint8_t *ptr,
-                              const uint8_t *end, Error *perr)
+                              const uint8_t *end)
 {
+    if (ctx->error)
+        return ptr;
+
     uint_fast8_t ch, ch1;
     unsigned nc;
 
@@ -166,19 +169,19 @@ success:
     goto out;
 
 inval_incomplete:
-    *perr = context_panic(ctx, ERROR_VALUE, "not enough continuation bytes"
-                          " after leading byte (0x%02X)", (unsigned)ch1);
+    context_panic(ctx, ERROR_VALUE, "not enough continuation bytes"
+                  " after leading byte (0x%02X)", (unsigned)ch1);
     goto error;
 
 inval_lead:
-    *perr = context_panic(ctx, ERROR_VALUE, "invalid leading byte (0x%02X)",
-                          (unsigned)ch1);
+    context_panic(ctx, ERROR_VALUE, "invalid leading byte (0x%02X)",
+                  (unsigned)ch1);
     goto error;
 
 inval_cont:
-    *perr = context_panic(ctx, ERROR_VALUE, "leading byte 0x%02X followed by"
-                          " invalid continuation byte (0x%02X)",
-                          (unsigned)ch1, (unsigned)ch);
+    context_panic(ctx, ERROR_VALUE, "leading byte 0x%02X followed by"
+                  " invalid continuation byte (0x%02X)",
+                  (unsigned)ch1, (unsigned)ch);
     goto error;
 
 error:
@@ -190,8 +193,11 @@ out:
 
 
 static const uint8_t *char_scan_uescape(Context *ctx, const uint8_t *ptr,
-                                        const uint8_t *end, Error *perr)
+                                        const uint8_t *end)
 {
+    if (ctx->error)
+        return ptr;
+
     const uint8_t *input = ptr;
     int32_t code, low;
     uint_fast8_t ch;
@@ -235,33 +241,33 @@ static const uint8_t *char_scan_uescape(Context *ctx, const uint8_t *ptr,
     goto out;
 
 error_inval_incomplete:
-    *perr = context_panic(ctx, ERROR_VALUE, "incomplete escape code (\\u%.*s)",
-                          (int)(end - input), input);
+    context_panic(ctx, ERROR_VALUE, "incomplete escape code (\\u%.*s)",
+                  (int)(end - input), input);
     goto out;
 
 error_inval_hex:
-    *perr = context_panic(ctx, ERROR_VALUE,
-                          "invalid hex value in escape code (\\u%.*s)",
-                          4, input);
+    context_panic(ctx, ERROR_VALUE,
+                  "invalid hex value in escape code (\\u%.*s)",
+                  4, input);
     goto out;
 
 error_inval_nolow:
-    *perr = context_panic(ctx, ERROR_VALUE, "missing UTF-16 low surrogate"
-                          " after high surrogate escape code (\\u%.*s)",
-                          4, input);
+    context_panic(ctx, ERROR_VALUE, "missing UTF-16 low surrogate"
+                  " after high surrogate escape code (\\u%.*s)",
+                  4, input);
     goto out;
 
 error_inval_low:
-    *perr = context_panic(ctx, ERROR_VALUE,
-                          "invalid UTF-16 low surrogate (\\u%.*s)"
-                          " after high surrogate escape code (\\u%.*s)",
-                          4, input, 4, input - 6);
+    context_panic(ctx, ERROR_VALUE,
+                  "invalid UTF-16 low surrogate (\\u%.*s)"
+                  " after high surrogate escape code (\\u%.*s)",
+                  4, input, 4, input - 6);
     goto out;
 
 error_inval_nohigh:
-    *perr = context_panic(ctx, ERROR_VALUE, "missing UTF-16 high surrogate"
-                          " before low surrogate escape code (\\u%.*s)",
-                          4, input);
+    context_panic(ctx, ERROR_VALUE, "missing UTF-16 high surrogate"
+                  " before low surrogate escape code (\\u%.*s)",
+                  4, input);
     goto out;
 
 out:
@@ -270,8 +276,11 @@ out:
 
 
 const uint8_t *char_scan_escape(Context *ctx, const uint8_t *ptr,
-                                const uint8_t *end, Error *perr)
+                                const uint8_t *end)
 {
+    if (ctx->error)
+        return ptr;
+
     uint_fast8_t ch;
 
     if (ptr == end) {
@@ -291,8 +300,8 @@ const uint8_t *char_scan_escape(Context *ctx, const uint8_t *ptr,
     case 't':
         break;
     case 'u':
-        ptr = char_scan_uescape(ctx, ptr, end, perr);
-        if (*perr) {
+        ptr = char_scan_uescape(ctx, ptr, end);
+        if (ctx->error) {
             goto out;
         }
         break;
@@ -303,11 +312,11 @@ const uint8_t *char_scan_escape(Context *ctx, const uint8_t *ptr,
     goto out;
 
 error_incomplete:
-    *perr = context_panic(ctx, ERROR_VALUE, "incomplete escape code (\\)");
+    context_panic(ctx, ERROR_VALUE, "incomplete escape code (\\)");
     goto out;
 
 error_inval:
-    *perr = context_panic(ctx, ERROR_VALUE, "invalid escape code (\\%c)", ch);
+    context_panic(ctx, ERROR_VALUE, "invalid escape code (\\%c)", ch);
     goto out;
 
 out:
@@ -317,7 +326,8 @@ out:
 
 Char32 char_decode_utf8(Context *ctx, const uint8_t **pptr)
 {
-    (void)ctx;
+    if (ctx->error)
+        return CHAR32_NONE;
 
     const uint8_t *ptr = *pptr;
     Char32 code;
@@ -351,7 +361,8 @@ Char32 char_decode_utf8(Context *ctx, const uint8_t **pptr)
 
 static Char32 char_decode_uescape(Context *ctx, const uint8_t **pptr)
 {
-    (void)ctx;
+    if (ctx->error)
+        return CHAR32_NONE;
 
     const uint8_t *ptr = *pptr;
     Char32 code;
@@ -385,6 +396,9 @@ static Char32 char_decode_uescape(Context *ctx, const uint8_t **pptr)
 
 Char32 char_decode_escape(Context *ctx, const uint8_t **pptr)
 {
+    if (ctx->error)
+        return CHAR32_NONE;
+
     const uint8_t *ptr = *pptr;
     Char32 code = (Char32)*ptr++;
 
@@ -419,7 +433,9 @@ Char32 char_decode_escape(Context *ctx, const uint8_t **pptr)
 // http://www.fileformat.info/info/unicode/utf8.htm
 void char_encode_utf8(Context *ctx, Char32 code, uint8_t **pptr)
 {
-    (void)ctx;
+    if (ctx->error)
+        return;
+
     uint8_t *ptr = *pptr;
 
     assert(code >= 0);

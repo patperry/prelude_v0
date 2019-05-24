@@ -18,38 +18,13 @@
 #include <time.h>
 #include <unistd.h>
 
-/* https://stackoverflow.com/a/10269766/6233565 */
-#define container_of(ptr, type, member) \
-    ((type *) ((char *)(ptr) - offsetof(type, member)))
+#include "prelude.h"
 
 // https://people.eecs.berkeley.edu/~sangjin/2012/12/21/epoll-vs-kqueue.html
 
 #define BUFFER_LEN 4096
 
-typedef enum {
-    ERROR_NONE = 0,
-    ERROR_MEMORY,
-    ERROR_VALUE,
-    ERROR_OVERFLOW,
-    ERROR_OS
-} Error;
 
-
-int error_code(int errnum)
-{
-    switch (errnum) {
-    case 0:
-        return 0;
-    case EINVAL:
-        return ERROR_VALUE;
-    case ENOMEM:
-        return ERROR_MEMORY;
-    case EOVERFLOW:
-        return ERROR_OVERFLOW;
-    default:
-        return ERROR_OS;
-    }
-}
 
 
 int64_t clock_usec(clockid_t clock_id)
@@ -60,91 +35,8 @@ int64_t clock_usec(clockid_t clock_id)
 }
 
 
-#define CONTEXT_MESSAGE_MAX 1024
-
-typedef struct {
-    Error error;
-    const char *message;
-    char _buffer0[CONTEXT_MESSAGE_MAX];
-    char _buffer1[CONTEXT_MESSAGE_MAX];
-} Context;
 
 
-void context_init(Context *ctx)
-{
-    memset(ctx, 0, sizeof(*ctx));
-}
-
-
-void context_deinit(Context *ctx)
-{
-    (void)ctx;
-}
-
-
-void context_recover(Context *ctx)
-{
-    ctx->error = 0;
-    ctx->message = NULL;
-}
-
-
-void context_panic(Context *ctx, Error error, const char *format, ...)
-{
-    char *message = (ctx->message == ctx->_buffer0 ?
-                     ctx->_buffer1 :
-                     ctx->_buffer0);
-
-    va_list args;
-    va_start(args, format);
-    vsnprintf(message, CONTEXT_MESSAGE_MAX, format, args);
-    va_end(args);
-
-    ctx->message = message;
-    ctx->error = error;
-}
-
-
-void context_code(Context *ctx, int errnum)
-{
-    int error = error_code(errnum);
-    if (error) {
-        context_panic(ctx, error, "%s", strerror(errnum));
-    } else {
-        context_recover(ctx);
-    }
-}
-
-void *memory_realloc(Context *ctx, void *buffer, size_t old_len, size_t new_len)
-{
-    (void)old_len;
-
-    if (ctx->error)
-        return buffer;
-
-    if (new_len == 0) {
-        free(buffer);
-        return NULL;
-    }
-
-    void *new_buffer = realloc(buffer, new_len);
-
-    if (!new_buffer) {
-        if (new_len > old_len) {
-            context_panic(ctx, ERROR_MEMORY, "failed allocating %zu bytes",
-                          new_len);
-        }
-        return buffer;
-    }
-
-    return new_buffer;
-}
-
-
-void *memory_alloc(Context *ctx, size_t size)
-{
-    return memory_realloc(ctx, NULL, 0, size);
-}
 
 
 typedef enum {
@@ -256,7 +148,7 @@ bool task_advance(Context *ctx, Task *task)
         return false;
     }
 
-    printf("blocked. waiting...\n");
+    log_debug(ctx, "blocked. waiting...");
     switch (task->block.type) {
     case BLOCK_NONE:
         break;
@@ -834,7 +726,7 @@ static bool httpget_start(Context *ctx, HttpGet *req)
     req->hints.ai_protocol = IPPROTO_TCP;
     getaddrinfo_init(ctx, &req->getaddr, req->host, "http", &req->hints);
 
-    printf("getaddr started\n");
+    log_debug(ctx, "getaddr started");
     req->state = HTTPGET_GETADDR;
     return false;
 }
@@ -852,8 +744,8 @@ static bool httpget_getaddr(Context *ctx, HttpGet *req)
 
     req->addrinfo = req->getaddr.result;
 
-    printf("getaddr finished\n");
-    printf("open started\n");
+    log_debug(ctx, "getaddr finished");
+    log_debug(ctx, "open started");
     req->state = HTTPGET_OPEN;
     return false;
 }
@@ -893,8 +785,8 @@ static bool httpget_open(Context *ctx, HttpGet *req)
     sockconnect_init(ctx, &req->conn, req->sockfd, req->addrinfo->ai_addr,
                      req->addrinfo->ai_addrlen);
 
-    printf("open finished\n");
-    printf("connect started\n");
+    log_debug(ctx, "open finished");
+    log_debug(ctx, "connect started");
     req->state = HTTPGET_CONNECT;
     return false;
 }
@@ -942,8 +834,8 @@ static bool httpget_connect(Context *ctx, HttpGet *req)
     socksend_init(ctx, &req->send, req->sockfd, req->buffer,
                   strlen(req->buffer), 0);
 
-    printf("connect finished\n");
-    printf("send started\n");
+    log_debug(ctx, "connect finished");
+    log_debug(ctx, "send started");
     req->state = HTTPGET_SEND;
     return false;
 }
@@ -966,8 +858,8 @@ static bool httpget_send(Context *ctx, HttpGet *req)
     assert(req->data_max >= BUFFER_LEN);
     sockrecv_init(ctx, &req->recv, req->sockfd, req->data, BUFFER_LEN, 0);
 
-    printf("send finished\n");
-    printf("meta started\n");
+    log_debug(ctx, "send finished");
+    log_debug(ctx, "meta started");
     req->state = HTTPGET_META;
     return false;
 }
@@ -1010,7 +902,7 @@ static bool httpget_meta(Context *ctx, HttpGet *req)
 
     if (empty_line) {
         req->state = HTTPGET_FINISH;
-        printf("meta finished\n");
+        log_debug(ctx, "meta finished");
     } else {
         size_t empty = req->data_max - req->data_len; 
         if (empty < BUFFER_LEN) {
@@ -1155,7 +1047,7 @@ static void httpget_finish(Context *ctx, HttpGet *req)
         context_panic(ctx, ERROR_OVERFLOW,
                       "HTTP `Content-Length` value `%s`"
                       " exceeds maximum (%"PRIdMAX")",
-                      header->value, INTMAX_MAX);
+                      header->value, (intmax_t)INTMAX_MAX);
     } else {
         assert(SIZE_MAX >= INTMAX_MAX);
         req->content_length = (size_t)content_length;
@@ -1274,7 +1166,7 @@ int main(int argc, const char **argv)
     // int64_t start = clock_usec(CLOCK_MONOTONIC_RAW);
     // int64_t deadline = start + 15 * 1000 * 1000; // 15s
     Context ctx;
-    context_init(&ctx);
+    context_init(&ctx, NULL, NULL, NULL, NULL);
 
     HttpGet req;
     httpget_init(&ctx, &req, "www.unicode.org",
@@ -1284,18 +1176,18 @@ int main(int argc, const char **argv)
     if (ctx.error)
         goto exit;
 
-    printf("status: `%s`\n", req.status);
+    log_debug(&ctx, "status: `%s`", req.status);
     size_t i, n = req.header_count;
     for (i = 0; i < n; i++) {
-        printf("header: `%s`: `%s`\n",
-               req.headers[i].key, req.headers[i].value);
+        log_debug(&ctx, "header: `%s`: `%s`",
+                  req.headers[i].key, req.headers[i].value);
     }
 
-    printf("content-length: %zu\n", req.content_length);
+    log_debug(&ctx, "content-length: %zu", req.content_length);
 
     while (httpget_advance(&ctx, &req)) {
         task_await(&ctx, &req.current.task);
-        printf("read %d bytes:\n", (int)req.current.data_len);
+        log_debug(&ctx, "read %d bytes", (int)req.current.data_len);
         printf("----------------------------------------\n");
         printf("%.*s", (int)req.current.data_len, (char *)req.current.data);
         printf("\n----------------------------------------\n");

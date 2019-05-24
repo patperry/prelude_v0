@@ -87,12 +87,11 @@ static int view(lua_State *L, TextViewType flags)
     const char *input = luaL_checklstring(L, 1, &len);
     Context *ctx = lprelude_open(L);
     Text text;
-    Error err = ERROR_NONE;
     int nret;
 
-    text_view(ctx, &text, flags, (const uint8_t *)input, len, &err);
+    text_view(ctx, &text, flags, (const uint8_t *)input, len);
 
-    switch (err) {
+    switch (ctx->error) {
     case ERROR_NONE:
         pushtext(L, &text);
         nret = 1;
@@ -100,7 +99,7 @@ static int view(lua_State *L, TextViewType flags)
 
     case ERROR_VALUE:
         lua_pushboolean(L, 0);
-        lua_pushstring(L, context_message(ctx));
+        lua_pushstring(L, ctx->message);
         context_recover(ctx);
         nret = 2;
         break;

@@ -1,9 +1,27 @@
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include "prelude.h"
+
+
+Error error_code(int errnum)
+{
+    switch (errnum) {
+    case 0:
+        return 0;
+    case EINVAL:
+        return ERROR_VALUE;
+    case ENOMEM:
+        return ERROR_MEMORY;
+    case EOVERFLOW:
+        return ERROR_OVERFLOW;
+    default:
+        return ERROR_OS;
+    }
+}
 
 
 void *default_alloc(void *buf, size_t old_size, size_t new_size, void *data)
@@ -55,17 +73,17 @@ void context_init(Context *ctx, AllocFunc alloc, void *alloc_data,
     memset(ctx, 0, sizeof(*ctx));
 
     if (alloc) {
-        ctx->alloc = alloc;
-        ctx->alloc_data = alloc_data;
+        ctx->_alloc = alloc;
+        ctx->_alloc_data = alloc_data;
     } else {
-        ctx->alloc = &default_alloc;
+        ctx->_alloc = &default_alloc;
     }
 
     if (log) {
-        ctx->log = log;
-        ctx->log_data = log_data;
+        ctx->_log = log;
+        ctx->_log_data = log_data;
     } else {
-        ctx->log = &default_log;
+        ctx->_log = &default_log;
     }
 }
 
@@ -76,33 +94,35 @@ void context_deinit(Context *ctx)
 }
 
 
-Error context_panic(Context *ctx, Error error, const char *format, ...)
+void context_panic(Context *ctx, Error error, const char *format, ...)
 {
+    char *message = (ctx->message == ctx->_buffer0 ?
+                     ctx->_buffer1 :
+                     ctx->_buffer0);
+
     va_list args;
     va_start(args, format);
-    vsnprintf(ctx->buffer, sizeof(ctx->buffer), format, args);
+    vsnprintf(message, CONTEXT_MESSAGE_MAX, format, args);
     va_end(args);
+
+    ctx->message = message;
     ctx->error = error;
-    return error;
 }
 
 
-Error context_recover(Context *ctx)
+void context_recover(Context *ctx)
 {
     ctx->error = ERROR_NONE;
-    return ctx->error;
+    ctx->message = NULL;
 }
 
 
-Error context_error(Context *ctx)
+void context_code(Context *ctx, int errnum)
 {
-    return ctx->error;
-}
-
-
-const char *context_message(Context *ctx)
-{
-    if (!ctx->error)
-        return NULL;
-    return ctx->buffer;
+    int error = error_code(errnum);
+    if (error) {
+        context_panic(ctx, error, "%s", strerror(errnum));
+    } else {
+        context_recover(ctx);
+    }
 }

@@ -28,12 +28,12 @@ LUA_LIB_O =	$(LUASRC)/lauxlib.o $(LUASRC)/lbaselib.o $(LUASRC)/lbitlib.o \
 			$(LUASRC)/lmathlib.o $(LUASRC)/loslib.o $(LUASRC)/lstrlib.o \
 			$(LUASRC)/ltablib.o $(LUASRC)/lutf8lib.o $(LUASRC)/loadlib.o \
 			ext/lua/linit.o
-LUA_EXT_O = ext/lua/lprelude.o ext/lua/socket.o ext/lua/text.o
+LUA_EXT_O = ext/lua/lprelude.o ext/lua/text.o
 LUA_BASE_O = $(LUA_CORE_O) $(LUA_LIB_O) $(LUA_EXT_O)
 LUA = bin/lua
 
 ALL_O = $(LIBRARY_O) $(LUA_BASE_O) $(LUASRC)/lua.o src/main/schema.o
-ALL_T = $(LIBRARY_A) bin/lua bin/schema
+ALL_T = $(LIBRARY_A) bin/lua bin/download bin/schema
 ALL_A = $(LIBRARY_A) $(LUA_A)
 
 .PHONY: all
@@ -49,6 +49,9 @@ $(LUA_A): $(LUA_BASE_O)
 
 bin/lua: $(LUASRC)/lua.o $(LUA_A) $(LIBRARY_A)
 	$(MKDIR_P) bin && $(CC) $(LDFLAGS) -o $@ $^ $(LIBS) $(LUA_LIBS)
+
+bin/download: src/main/download.o $(LIBRARY_A)
+	$(MKDIR_P) bin && $(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 bin/schema: src/main/schema.o $(LIBRARY_A)
 	$(MKDIR_P) bin && $(CC) $(LDFLAGS) -o $@ $^ $(LIBS)

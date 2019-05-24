@@ -25,8 +25,10 @@ void log_info(Context *ctx, const char *format, ...)
 
 void vlog(Context *ctx, LogType log, const char *format, va_list args)
 {
-    if (!ctx->error) {
-        vsnprintf(ctx->buffer, sizeof(ctx->buffer), format, args);
-        (ctx->log)(log, ctx->buffer, ctx->log_data);
-    }
+    char *buffer = (ctx->message == ctx->_buffer0 ?
+                    ctx->_buffer1 :
+                    ctx->_buffer0);
+
+    vsnprintf(buffer, CONTEXT_MESSAGE_MAX, format, args);
+    (ctx->_log)(log, buffer, ctx->_log_data);
 }

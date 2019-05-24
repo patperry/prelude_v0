@@ -12,19 +12,28 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* https://stackoverflow.com/a/10269766/6233565 */
+#define container_of(ptr, type, member) \
+    ((type *) (void *)((char *)(void *)(ptr) - offsetof(type, member)))
+
+
 /**
  * \defgroup context Session context
  * @{
  */
 
-#define CONTEXT_BUFFER_MAX 1024
+#define CONTEXT_MESSAGE_MAX 1024
 
 typedef enum {
     ERROR_NONE = 0,
     ERROR_MEMORY,
     ERROR_OVERFLOW,
-    ERROR_VALUE
+    ERROR_VALUE,
+    ERROR_OS
 } Error;
+
+Error error_code(int errnum);
+
 
 typedef enum {
     LOG_NONE = 0,
@@ -38,12 +47,15 @@ typedef void* (*AllocFunc)(void *buf, size_t old_size, size_t new_size,
 typedef void (*LogFunc)(LogType log, const char *message, void *data);
 
 typedef struct {
-    char buffer[CONTEXT_BUFFER_MAX];
-    AllocFunc alloc;
-    LogFunc log;
-    void *alloc_data;
-    void *log_data;
     Error error;
+    const char *message;
+
+    AllocFunc _alloc;
+    LogFunc _log;
+    void *_alloc_data;
+    void *_log_data;
+    char _buffer0[CONTEXT_MESSAGE_MAX];
+    char _buffer1[CONTEXT_MESSAGE_MAX];
 } Context;
 
 void *default_alloc(void *buf, size_t old_size, size_t new_size, void *data);
@@ -53,11 +65,11 @@ void context_init(Context *ctx, AllocFunc alloc, void *alloc_data,
                   LogFunc log, void *log_data);
 void context_deinit(Context *ctx);
 
-Error context_panic(Context *ctx, Error error, const char *format, ...)
+void context_panic(Context *ctx, Error error, const char *format, ...)
     __attribute__ ((format (printf, 3, 4)));
-Error context_recover(Context *ctx);
-Error context_error(Context *ctx);
-const char *context_message(Context *ctx);
+void context_recover(Context *ctx);
+void context_code(Context *ctx, int errnum);
+
 
 /**@}*/
 
@@ -96,8 +108,7 @@ void memory_copy(Context *ctx, void *buf, const void *src, size_t size);
  */
 
 void array_reserve(Context *ctx, void **pbase, size_t width,
-                   int32_t *pcapacity, int32_t count, int32_t extra,
-                   Error *perr);
+                   int32_t *pcapacity, int32_t count, int32_t extra);
 
 /**@}*/
 
@@ -149,7 +160,7 @@ typedef int32_t Char32;
  * Fails with ERROR_VALUE for invalid UTF-8.
  */
 const uint8_t *char_scan_utf8(Context *ctx, const uint8_t *ptr,
-                              const uint8_t *end, Error *perr);
+                              const uint8_t *end);
 
 /**
  * Scan a JSON-style backslash (\\) escape.
@@ -157,7 +168,7 @@ const uint8_t *char_scan_utf8(Context *ctx, const uint8_t *ptr,
  * Fails with ERROR_VALUE for invalid UTF-8 or invalid escape code.
  */
 const uint8_t *char_scan_escape(Context *ctx, const uint8_t *ptr,
-                                const uint8_t *end, Error *perr);
+                                const uint8_t *end);
 
 /**
  * Decode the first code point from a UTF-8 character buffer, without
@@ -281,7 +292,7 @@ typedef enum {
 } TextViewType;
 
 void text_view(Context *ctx, Text *text, TextViewType flags,
-               const uint8_t *bytes, size_t size, Error *perr);
+               const uint8_t *bytes, size_t size);
 
 bool text_equal(Context *ctx, const Text *text1, const Text *text2);
 int32_t text_length(Context *ctx, const Text *text);
@@ -336,139 +347,5 @@ typedef struct {
 } TextMap;
 
 /**@}*/
-
-/**
- * Sockets
- *
- * [gnu]: https://www.gnu.org/software/libc/manual/html_node/Sockets.html
- * [tutorial]: http://beej.us/guide/bgnet/html/single/bgnet.html
- *
- *
- * HTTP/1.1 messages
- *
- * [overview]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Messages
- * [response-length]: https://stackoverflow.com/a/4824738/6233565
- */
-
-typedef enum {
-    SOCKET_FAMILY_NONE = 0, /* AF_UNSPEC / PF_UNSPEC */
-    SOCKET_FAMILY_INET,     /* AF_INET / PF_INET */
-    SOCKET_FAMILY_INET6,    /* AF_INET6 /  PF_INET6 */
-    SOCKET_FAMILY_PACKET    /* AF_PACKET / PF_INET */
-} SocketFamilyType;
-
-typedef enum {
-    SOCKET_COMM_NONE = 0,
-    SOCKET_COMM_STREAM,     /* SOCK_STREAM */
-    SOCKET_COMM_DGRAM,      /* SOCK_DGRAM */
-    SOCKET_COMM_RAW         /* SOCK_RAW */
-} SocketCommType;
-
-typedef enum {
-    SOCKET_PROTO_NONE = 0,  /* IPPROTO_IP */
-    SOCKET_PROTO_TCP,       /* IPPROTO_TCP */
-    SOCKET_PROTO_UDP,       /* IPPROTO_UDP */
-    SOCKET_PROTO_RAW        /* IPPROTO_RAW */
-} SocketProtoType;
-
-typedef enum {
-    HOSTLOOKUP_USABLE = 0,
-        /* AI_HOSTLOOKUP_ADDRCONFIG | AI_V4MAPPED */
-
-    HOSTLOOKUP_NUMERICHOST = (1 << 0),
-        /* host is a numeric string; no name lookup */
-    HOSTLOOKUP_NUMERICSERV = (1 << 1),
-        /* service is a numeric string (port number); no name lookup */
-
-    HOSTLOOKUP_PASSIVE = (1 << 2),
-        /* passed with NULL host to get a bind address */
-
-    HOSTLOOKUP_ALL = (1 << 3),
-        /* include v4 addresses when v6 requested and V4MAPPED is set */
-    HOSTLOOKUP_NOADDRCONFIG = (1 << 4),
-        /* include unsupported families */
-    HOSTLOOKUP_NOCANONNAME = (1 << 5),
-        /* do not set the canonical name `canonname` in the result */
-    HOSTLOOKUP_NOV4MAPPED = (1 << 6)
-        /* do not map IPv4 to IPv6 */
-} HostLookupFlags;
-
-
-typedef struct {
-    void *address;
-    int address_len;
-} HostAddress;
-
-typedef struct {
-    void *addrinfo; /* `struct addrinfo` from `getaddrinfo` */
-    int addrinfo_error; /* gai_strerror */
-
-    SocketFamilyType family;
-    SocketCommType comm;
-    SocketProtoType proto;
-    HostAddress addr;
-    const char *canonname;
-} HostLookup;
-
-void hostlookup_init(Context *ctx, HostLookup *look, const char *host,
-                     const char *service, SocketFamilyType family,
-                     SocketCommType comm, SocketProtoType proto,
-                     HostLookupFlags flags);
-
-/* All arguments are optional, but you cannot leave both `host` and `service` 
- * unspecified.
- *
- * # NULL host
- *
- * With `HOSTLOOKUP_PASSIVE`, use the wildcard address (INADDR_ANY), used
- * to accept connections on any of the system's network addresses.
- *
- * Otherwise, use the loopback interface address (INADDR_LOOPBACK), used for
- * communication with peers on the same host.
- *
- *
- * # NULL service
- *
- * Leaves the port number unspecified in the returned address (so that `bind`
- * can assign the port later).
- */
-
-bool hostlookup_advance(Context *ctx, HostLookup *look, Error *perr);
-void hostlookup_deinit(Context *ctx, HostLookup *look);
-
-typedef struct {
-    int fd;
-} Socket;
-
-
-void socket_init(Context *ctx, Socket *sock, SocketFamilyType family,
-                 SocketCommType comm, SocketProtoType proto);
-void socket_deinit(Context *ctx, Socket *sock);
-
-/* https://stackoverflow.com/a/2939145/6233565 */
-
-void socket_connect(Context *ctx, Socket *sock, const HostAddress *addr,
-                    Error *perr);
-void socket_disconnect(Context *ctx, Socket *sock);
-
-typedef enum {
-    SOCKET_SEND_NORMAL = 0,
-    SOCKET_SEND_OOB = (1 << 0),
-    SOCKET_SEND_DONTROUTE = (1 << 1)
-} SocketSendFlags;
-
-void socket_send(Context *ctx, Socket *sock, const uint8_t *bytes,
-                 int32_t size, SocketSendFlags flags, Error *perr);
-
-typedef enum {
-    SOCKET_RECEIVE_NORMAL = 0,
-    SOCKET_RECEIVE_OOB = (1 << 0),
-    SOCKET_RECEIVE_PEEK = (1 << 1),
-    SOCKET_RECEIVE_WAITALL = (1 << 2)
-} SocketReceiveFlags;
-
-void socket_receive(Context *ctx, Socket *sock, uint8_t *buf,
-                    int32_t capacity, SocketReceiveFlags flags,
-                    Task *ptask, int32_t *pcount, Error *perr);
 
 #endif /* PRELUDE_H */

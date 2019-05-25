@@ -396,10 +396,40 @@ typedef struct {
 /**@}*/
 
 /**
+ * \defgroup stream Streams (duplex communication channels)
+ */
+
+/* OpenSSL https://stackoverflow.com/a/16328115/6233565 */
+/* https://nachtimwald.com/2014/10/06/client-side-session-cache-in-openssl/ */
+/* https://nachtimwald.com/2014/10/05/server-side-session-cache-in-openssl/ */
+typedef struct {
+    int _dummy;
+} Stream;
+
+
+typedef struct {
+    Task task;
+    Stream *stream;
+    void *buffer;
+    int length;
+    int nread;
+} Read;
+
+void read_init(Context *ctx, Read *req, Stream *stream,
+               void *buffer, int length);
+void read_reinit(Context *ctx, Read *req, Stream *stream,
+                 void *buffer, int length);
+void read_deinit(Context *ctx, Read *req);
+
+
+/**@}*/
+
+/**
  * \defgroup socket Sockets
  */
 
 typedef struct {
+    Stream stream;
     int fd;
 } Socket;
 
@@ -433,6 +463,48 @@ void socketshutdown_init(Context *ctx, SocketShutdown *req, Socket *socket,
 void socketshutdown_deinit(Context *ctx, SocketShutdown *req);
 
 /**@}*/
+
+/**
+ * \defgroup tls Transport Layer Security
+ */
+
+typedef enum {
+    TLSFILE_PEM,
+    TLSFILE_ASN1
+} TlsFileType;
+
+typedef enum {
+    TLSMETHOD_NONE = 0,
+    TLSMETHOD_SERVER,
+    TLSMETHOD_CLIENT
+} TlsMethod;
+
+typedef struct {
+    void *_ssl_ctx;
+} TlsContext;
+
+void tlscontext_init(Context *ctx, TlsContext *tls, TlsMethod method);
+void tlscontext_deinit(Context *ctx, TlsContext *tls);
+void tlscontext_certificate_file(Context *ctx, TlsContext *tls,  
+                                 const char *file, TlsFileType type);
+void tlscontext_privatekey_file(Context *ctx, TlsContext *tls,  
+                                const char *file, TlsFileType type);
+
+typedef struct {
+    void *_ssl_session;
+} TlsSession;
+
+void tlssession_init(Context *ctx, TlsSession *session, TlsContext *tls);
+void tlssession_deinit(Context *ctx, TlsSession *session);
+
+typedef struct {
+    void *_ssl;
+} TlsSocket;
+
+void tlssocket_init(Context *ctx, TlsSocket *ssock, Socket *sock,
+                    TlsContext *tls, TlsSession *session);
+void tlssocket_deinit(Context *ctx, TlsSocket *ssock);
+
 
 /**
  * \defgroup dns DNS utilities

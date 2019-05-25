@@ -298,7 +298,6 @@ typedef struct {
     size_t buffer_len;
     size_t data_len;
     size_t data_max;
-
 } HttpGet;
 
 

@@ -3,15 +3,15 @@ CC += -std=c99
 MKDIR_P = mkdir -p
 RANLIB = ranlib
 
-LIBS += -lm
+LIBS += -lm -lssl -lcrypto
 CFLAGS += -Wall -Wextra -pedantic -Werror -g
-CPPFLAGS += -Isrc
-LDFLAGS += -g
+CPPFLAGS += -Isrc -I/usr/local/opt/libressl/include
+LDFLAGS += -g -L/usr/local/opt/libressl/lib
 
 LIBRARY_A = src/library.a
 LIBRARY_O = src/array.o src/async.o src/char.o src/context.o src/dns.o \
 			src/log.o src/memory.o src/socket.o src/text.o src/textalloc.o \
-			src/textbuild.o src/textiter.o
+			src/textbuild.o src/textiter.o src/tls.o
 
 LUASRC = lib/lua-5.3.5/src
 LUA_CPPFLAGS = -DLUA_USE_READLINE -I$(LUASRC)

@@ -425,42 +425,40 @@ void read_deinit(Context *ctx, Read *req);
 /**@}*/
 
 /**
- * \defgroup socket Sockets
+ * \defgroup tcp TCP Streams
  */
 
 typedef struct {
     Stream stream;
     int fd;
-} Socket;
+} Tcp;
 
-void socket_init(Context *ctx, Socket *sock, int domain, int type,
-                 int protocol);
-
-void socket_deinit(Context *ctx, Socket *sock);
+void tcp_init(Context *ctx, Tcp *tcp, int domain);
+void tcp_deinit(Context *ctx, Tcp *sock);
 
 
 typedef struct {
     Task task;
-    Socket *socket;
+    Tcp *tcp;
     const struct sockaddr *address;
     int address_len;
     bool started;
-} SocketConnect;
+} TcpConnect;
 
-void socketconnect_init(Context *ctx, SocketConnect *req, Socket *socket,
-                        const struct sockaddr *address, int address_len);
-void socketconnect_deinit(Context *ctx, SocketConnect *conn);
+void tcpconnect_init(Context *ctx, TcpConnect *req, Tcp *tcp,
+                     const struct sockaddr *address, int address_len);
+void tcpconnect_deinit(Context *ctx, TcpConnect *conn);
 
 
 typedef struct {
     Task task;
-    Socket *socket;
+    Tcp *tcp;
     int how;
-} SocketShutdown;
+} TcpShutdown;
 
-void socketshutdown_init(Context *ctx, SocketShutdown *req, Socket *socket,
-                         int how);
-void socketshutdown_deinit(Context *ctx, SocketShutdown *req);
+void tcpshutdown_init(Context *ctx, TcpShutdown *req, Tcp *tcp,
+                      int how);
+void tcpshutdown_deinit(Context *ctx, TcpShutdown *req);
 
 /**@}*/
 
@@ -490,20 +488,6 @@ void tlscontext_certificate_file(Context *ctx, TlsContext *tls,
 void tlscontext_privatekey_file(Context *ctx, TlsContext *tls,  
                                 const char *file, TlsFileType type);
 
-typedef struct {
-    void *_ssl_session;
-} TlsSession;
-
-void tlssession_init(Context *ctx, TlsSession *session, TlsContext *tls);
-void tlssession_deinit(Context *ctx, TlsSession *session);
-
-typedef struct {
-    void *_ssl;
-} TlsSocket;
-
-void tlssocket_init(Context *ctx, TlsSocket *ssock, Socket *sock,
-                    TlsContext *tls, TlsSession *session);
-void tlssocket_deinit(Context *ctx, TlsSocket *ssock);
 
 
 /**

@@ -10,7 +10,7 @@ LDFLAGS += -g -L/usr/local/opt/libressl/lib
 
 LIBRARY_A = src/library.a
 LIBRARY_O = src/array.o src/async.o src/char.o src/context.o src/dns.o \
-			src/log.o src/memory.o src/socket.o src/text.o src/textalloc.o \
+			src/log.o src/memory.o src/tcp.o src/text.o src/textalloc.o \
 			src/textbuild.o src/textiter.o src/tls.o
 
 LUASRC = lib/lua-5.3.5/src

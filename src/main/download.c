@@ -156,6 +156,7 @@ void socksend_deinit(Context *ctx, SockSend *req)
     (void)req;
 }
 
+/*
 typedef struct {
     Task task;
     Tcp *tcp;
@@ -236,6 +237,7 @@ void sockrecv_deinit(Context *ctx, SockRecv *req)
     (void)req;
 }
 
+*/
 
 
 
@@ -276,7 +278,7 @@ typedef struct {
     bool has_tcp;
     TcpConnect conn;
     SockSend send;
-    SockRecv recv;
+    Read read;
     TcpShutdown shutdown;
 
     const char *status;
@@ -606,7 +608,7 @@ static bool httpget_send_blocked(Context *ctx, HttpGet *req)
     req->data_max = req->buffer_len;
 
     assert(req->data_max >= BUFFER_LEN);
-    sockrecv_init(ctx, &req->recv, &req->tcp, req->data, BUFFER_LEN, 0);
+    read_init(ctx, &req->read, &req->tcp.stream, req->data, BUFFER_LEN);
 
     log_debug(ctx, "send finished");
     log_debug(ctx, "meta started");
@@ -620,12 +622,12 @@ static bool httpget_meta_blocked(Context *ctx, HttpGet *req)
     if (ctx->error)
         return false;
 
-    if (task_blocked(ctx, &req->recv.task)) {
-        req->task.block = req->recv.task.block;
+    if (task_blocked(ctx, &req->read.task)) {
+        req->task.block = req->read.task.block;
         return true;
     }
 
-    req->data_len += req->recv.nrecv;
+    req->data_len += req->read.nread;
 
     uint8_t *line_end;
     bool empty_line = false;
@@ -659,8 +661,7 @@ static bool httpget_meta_blocked(Context *ctx, HttpGet *req)
             httpget_grow_buffer(ctx, req, BUFFER_LEN - empty);
         }
 
-        sockrecv_reinit(ctx, &req->recv, &req->tcp,
-                        req->data + req->data_len, BUFFER_LEN, 0);
+        read_reset(ctx, &req->read, req->data + req->data_len, BUFFER_LEN);
     }
 
     return false;
@@ -677,7 +678,7 @@ static bool httpbody_blocked(Context *ctx, Task *task)
 
     Task *work;
     if (req->content_read < req->content_length) {
-        work = &req->recv.task;
+        work = &req->read.task;
     } else {
         work = &req->shutdown.task;
     }
@@ -725,8 +726,8 @@ bool httpget_advance(Context *ctx, HttpGet *req)
         req->current.data = req->data;
         data_len = req->data_len;
     } else {
-        req->current.data = req->recv.buffer;
-        data_len = req->recv.nrecv;
+        req->current.data = req->read.buffer;
+        data_len = req->read.nread;
     }
 
     if (data_len > tail_len) {
@@ -740,13 +741,13 @@ bool httpget_advance(Context *ctx, HttpGet *req)
     if (tail_len) {
         void *buffer;
         void *tail = req->data + (req->data_max - BUFFER_LEN);
-        if (!req->content_started || req->recv.buffer < tail) {
+        if (!req->content_started || req->read.buffer < tail) {
             buffer = tail;
         } else {
             buffer = req->data;
         }
         size_t buffer_len = tail_len > BUFFER_LEN ? BUFFER_LEN : tail_len;
-        sockrecv_reinit(ctx, &req->recv, &req->tcp, buffer, buffer_len, 0);
+        read_reset(ctx, &req->read, buffer, buffer_len);
     } else {
         tcpshutdown_init(ctx, &req->shutdown, &req->tcp, SHUT_RDWR);
     }
@@ -884,7 +885,7 @@ void httpget_deinit(Context *ctx, HttpGet *req)
         httpbody_deinit(ctx, &req->current);
 
     case HTTPGET_META:
-        sockrecv_deinit(ctx, &req->recv);
+        read_deinit(ctx, &req->read);
 
     case HTTPGET_SEND:
         socksend_deinit(ctx, &req->send);

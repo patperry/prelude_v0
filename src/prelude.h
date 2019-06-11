@@ -42,7 +42,7 @@ typedef enum {
 } LogType;
 
 typedef void* (*AllocFunc)(void *buf, size_t old_size, size_t new_size,
-                            void *data);
+                           void *data);
 
 typedef void (*LogFunc)(LogType log, const char *message, void *data);
 
@@ -402,25 +402,60 @@ typedef struct {
 /* OpenSSL https://stackoverflow.com/a/16328115/6233565 */
 /* https://nachtimwald.com/2014/10/06/client-side-session-cache-in-openssl/ */
 /* https://nachtimwald.com/2014/10/05/server-side-session-cache-in-openssl/ */
-typedef struct {
-    int _dummy;
-} Stream;
-
 
 typedef struct {
     Task task;
-    Stream *stream;
+    void *stream;
+    void *user;
     void *buffer;
     int length;
     int nread;
 } Read;
 
+typedef struct {
+    void (*read_init)(Context *ctx, Read *req, void *stream, void *buffer,
+                      int length);
+    void (*read_reset)(Context *ctx, Read *req, void *buffer, int length);
+    void (*read_deinit)(Context *ctx, Read *req);
+} StreamType;
+
+typedef struct {
+    StreamType *type;
+} Stream;
+
 void read_init(Context *ctx, Read *req, Stream *stream,
                void *buffer, int length);
-void read_reinit(Context *ctx, Read *req, Stream *stream,
-                 void *buffer, int length);
+void read_reset(Context *ctx, Read *req, void *buffer, int length);
 void read_deinit(Context *ctx, Read *req);
 
+
+/**@}*/
+
+/**
+ * \defgroup tls Transport Layer Security
+ */
+
+typedef enum {
+    TLSFILE_PEM,
+    TLSFILE_ASN1
+} TlsFileType;
+
+typedef enum {
+    TLSMETHOD_NONE = 0,
+    TLSMETHOD_SERVER,
+    TLSMETHOD_CLIENT
+} TlsMethod;
+
+typedef struct {
+    void *_ssl_ctx;
+} TlsContext;
+
+void tlscontext_init(Context *ctx, TlsContext *tls, TlsMethod method);
+void tlscontext_deinit(Context *ctx, TlsContext *tls);
+void tlscontext_certificate_file(Context *ctx, TlsContext *tls,
+                                 const char *file, TlsFileType type);
+void tlscontext_privatekey_file(Context *ctx, TlsContext *tls,
+                                const char *file, TlsFileType type);
 
 /**@}*/
 
@@ -461,34 +496,6 @@ void tcpshutdown_init(Context *ctx, TcpShutdown *req, Tcp *tcp,
 void tcpshutdown_deinit(Context *ctx, TcpShutdown *req);
 
 /**@}*/
-
-/**
- * \defgroup tls Transport Layer Security
- */
-
-typedef enum {
-    TLSFILE_PEM,
-    TLSFILE_ASN1
-} TlsFileType;
-
-typedef enum {
-    TLSMETHOD_NONE = 0,
-    TLSMETHOD_SERVER,
-    TLSMETHOD_CLIENT
-} TlsMethod;
-
-typedef struct {
-    void *_ssl_ctx;
-} TlsContext;
-
-void tlscontext_init(Context *ctx, TlsContext *tls, TlsMethod method);
-void tlscontext_deinit(Context *ctx, TlsContext *tls);
-void tlscontext_certificate_file(Context *ctx, TlsContext *tls,  
-                                 const char *file, TlsFileType type);
-void tlscontext_privatekey_file(Context *ctx, TlsContext *tls,  
-                                const char *file, TlsFileType type);
-
-
 
 /**
  * \defgroup dns DNS utilities

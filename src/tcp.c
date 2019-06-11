@@ -11,12 +11,27 @@
 
 static bool tcpconnect_blocked(Context *ctx, Task *task);
 static bool tcpshutdown_blocked(Context *ctx, Task *task);
+static bool tcpread_blocked(Context *ctx, Task *task);
+
+static void tcpread_init(Context *ctx, Read *req, void *stream, void *buffer,
+                         int length);
+static void tcpread_reset(Context *ctx, Read *req, void *buffer, int length);
+static void tcpread_deinit(Context *ctx, Read *req);
+
+static StreamType TcpStreamImpl = {
+    tcpread_init,
+    tcpread_reset,
+    tcpread_deinit
+};
 
 
 void tcp_init(Context *ctx, Tcp *tcp, int domain)
 {
+    memory_clear(ctx, tcp, sizeof(*tcp));
+    tcp->stream.type = &TcpStreamImpl;
+    tcp->fd = -1;
+
     if (ctx->error) {
-        tcp->fd = -1;
         return;
     }
 
@@ -137,5 +152,81 @@ bool tcpshutdown_blocked(Context *ctx, Task *task)
         }
     }
 
+    return false;
+}
+
+
+void tcpread_init(Context *ctx, Read *req, void *stream,
+                  void *buffer, int length)
+{
+    assert(length >= 0);
+
+    memory_clear(ctx, req, sizeof(*req));
+    req->stream = stream;
+    if (ctx->error)
+        return;
+
+    req->task._blocked = tcpread_blocked;
+    tcpread_reset(ctx, req, buffer, length);
+}
+
+
+void tcpread_reset(Context *ctx, Read *req, void *buffer, int length)
+{
+    assert(length >= 0);
+
+    if (ctx->error)
+        return;
+
+    Stream *stream = req->stream;
+    req->stream = stream;
+    req->buffer = buffer;
+    req->length = length;
+    req->nread = 0;
+}
+
+
+void tcpread_deinit(Context *ctx, Read *req)
+{
+    (void)ctx;
+    (void)req;
+}
+
+
+bool tcpread_blocked(Context *ctx, Task *task)
+{
+    if (ctx->error)
+        return false;
+
+    Read *req = (Read *)task;
+    Tcp *tcp = container_of(req->stream, Tcp, stream);
+
+    if (req->length == 0) {
+        return false;
+    }
+
+    int nrecv = (int)recv(tcp->fd, req->buffer, (size_t)req->length, 0);
+
+    if (nrecv < 0) {
+        int status = errno;
+        if (status == EAGAIN || status == EWOULDBLOCK || status == EINTR) {
+            req->task.block.type = BLOCK_IO;
+            req->task.block.job.io.fd = tcp->fd;
+            req->task.block.job.io.flags = IO_READ;
+            return true;
+        } else {
+            assert(status);
+            context_code(ctx, status);
+            context_panic(ctx, ctx->error,
+                          "failed receiving data: %s", ctx->message);
+        }
+    } else if (nrecv == 0) {
+        context_panic(ctx, ERROR_OS,
+                      "failed receiving data: connection reset by peer");
+    } else {
+        req->nread = nrecv;
+    }
+
+    req->task.block.type = BLOCK_NONE;
     return false;
 }

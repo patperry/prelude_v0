@@ -12,16 +12,26 @@
 static bool tcpconnect_blocked(Context *ctx, Task *task);
 static bool tcpshutdown_blocked(Context *ctx, Task *task);
 static bool tcpread_blocked(Context *ctx, Task *task);
+static bool tcpwrite_blocked(Context *ctx, Task *task);
 
 static void tcpread_init(Context *ctx, Read *req, void *stream, void *buffer,
                          int length);
 static void tcpread_reset(Context *ctx, Read *req, void *buffer, int length);
 static void tcpread_deinit(Context *ctx, Read *req);
 
+static void tcpwrite_init(Context *ctx, Write *req, void *stream, void *buffer,
+                          int length);
+static void tcpwrite_reset(Context *ctx, Write *req, void *buffer, int length);
+static void tcpwrite_deinit(Context *ctx, Write *req);
+
+
 static StreamType TcpStreamImpl = {
     tcpread_init,
     tcpread_reset,
-    tcpread_deinit
+    tcpread_deinit,
+    tcpwrite_init,
+    tcpwrite_reset,
+    tcpwrite_deinit
 };
 
 
@@ -178,8 +188,6 @@ void tcpread_reset(Context *ctx, Read *req, void *buffer, int length)
     if (ctx->error)
         return;
 
-    Stream *stream = req->stream;
-    req->stream = stream;
     req->buffer = buffer;
     req->length = length;
     req->nread = 0;
@@ -187,6 +195,39 @@ void tcpread_reset(Context *ctx, Read *req, void *buffer, int length)
 
 
 void tcpread_deinit(Context *ctx, Read *req)
+{
+    (void)ctx;
+    (void)req;
+}
+
+
+void tcpwrite_init(Context *ctx, Write *req, void *stream,
+                   void *buffer, int length)
+{
+    memset(req, 0, sizeof(*req));
+    req->stream = stream;
+    if (ctx->error)
+        return;
+
+    req->task._blocked = tcpwrite_blocked;
+    tcpwrite_reset(ctx, req, buffer, length);
+}
+
+
+void tcpwrite_reset(Context *ctx, Write *req, void *buffer, int length)
+{
+    assert(length >= 0);
+
+    if (ctx->error)
+        return;
+
+    req->buffer = buffer;
+    req->length = length;
+    req->nwrite = 0;
+}
+
+
+void tcpwrite_deinit(Context *ctx, Write *req)
 {
     (void)ctx;
     (void)req;
@@ -225,6 +266,48 @@ bool tcpread_blocked(Context *ctx, Task *task)
                       "failed receiving data: connection reset by peer");
     } else {
         req->nread = nrecv;
+    }
+
+    req->task.block.type = BLOCK_NONE;
+    return false;
+}
+
+
+bool tcpwrite_blocked(Context *ctx, Task *task)
+{
+    if (ctx->error)
+        return false;
+
+    Write *req = (Write *)task;
+    Tcp *tcp = container_of(req->stream, Tcp, stream);
+    
+    const void *buffer = (const char *)req->buffer + req->nwrite;
+    int length = req->length - req->nwrite;
+
+    if (length == 0) {
+        return false;
+    }
+
+    int nsend = (int)send(tcp->fd, buffer, (size_t)length, 0);
+
+    if (nsend < 0) {
+        int status = errno;
+        if (status == EAGAIN || status == EWOULDBLOCK || status == EINTR) {
+            req->task.block.type = BLOCK_IO;
+            req->task.block.job.io.fd = tcp->fd;
+            req->task.block.job.io.flags = IO_WRITE;
+            return true;
+        } else {
+            assert(status);
+            context_code(ctx, status);
+            context_panic(ctx, ctx->error,
+                          "failed sending data: %s", ctx->message);
+        }
+    } else {
+        req->nwrite += nsend;
+        if (req->nwrite < req->length) {
+            return true;
+        }
     }
 
     req->task.block.type = BLOCK_NONE;

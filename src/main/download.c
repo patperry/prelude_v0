@@ -57,190 +57,6 @@ int64_t clock_usec(clockid_t clock_id)
 
 
 
-
-/*
-typedef struct {
-    int (*_read) (Context *ctx, Stream *stream, void *buffer, int length);
-    int (*_write) (Context *ctx, Stream *stream, void *buffer, int length);
-} Stream;
-
-
-typedef struct {
-    Task task;
-    void *buffer;
-    int length;
-    int nread;
-} StreamRead;
-
-
-void streamread_init(Context *ctx, StreamRead *read, Stream *stream,
-                     void *buffer, int length)
-{
-}
-
-
-typedef struct {
-    Stream *base;
-} TcpStream;
-*/
-
-
-typedef struct {
-    Task task;
-    Tcp *tcp;
-    const void *buffer;
-    size_t length;
-    int flags;
-    size_t nsend;
-} SockSend;
-
-
-bool socksend_blocked(Context *ctx, Task *task)
-{
-    if (ctx->error)
-        return false;
-
-    SockSend *req = (SockSend *)task;
-    const void *buffer = (const char *)req->buffer + req->nsend;
-    size_t length = req->length - req->nsend;
-
-    if (length == 0) {
-        return false;
-    }
-
-    ssize_t nsend = send(req->tcp->fd, buffer, length, req->flags);
-
-    if (nsend < 0) {
-        int status = errno;
-        if (status == EAGAIN || status == EWOULDBLOCK || status == EINTR) {
-            req->task.block.type = BLOCK_IO;
-            req->task.block.job.io.fd = req->tcp->fd;
-            req->task.block.job.io.flags = IO_WRITE;
-            return true;
-        } else {
-            assert(status);
-            context_code(ctx, status);
-            context_panic(ctx, ctx->error,
-                          "failed sending data: %s", ctx->message);
-        }
-    } else {
-        req->nsend += (size_t)nsend;
-        if (req->nsend < req->length) {
-            return true;
-        }
-    }
-
-    req->task.block.type = BLOCK_NONE;
-    return false;
-}
-
-
-void socksend_init(Context *ctx, SockSend *req, Tcp *tcp,
-                   const void *buffer, size_t length, int flags)
-{
-    memset(req, 0, sizeof(*req));
-    if (ctx->error)
-        return;
-
-    req->task._blocked = socksend_blocked;
-    req->tcp = tcp;
-    req->buffer = buffer;
-    req->length = length;
-    req->flags = flags;
-    req->nsend = 0;
-}
-
-void socksend_deinit(Context *ctx, SockSend *req)
-{
-    (void)ctx;
-    (void)req;
-}
-
-/*
-typedef struct {
-    Task task;
-    Tcp *tcp;
-    void *buffer;
-    size_t length;
-    int flags;
-    size_t nrecv;
-} SockRecv;
-
-
-bool sockrecv_blocked(Context *ctx, Task *task)
-{
-    if (ctx->error)
-        return false;
-
-    SockRecv *req = (SockRecv *)task;
-
-    if (req->length == 0) {
-        return false;
-    }
-
-    ssize_t nrecv = recv(req->tcp->fd, req->buffer, req->length, req->flags);
-
-    if (nrecv < 0) {
-        int status = errno;
-        if (status == EAGAIN || status == EWOULDBLOCK || status == EINTR) {
-            req->task.block.type = BLOCK_IO;
-            req->task.block.job.io.fd = req->tcp->fd;
-            req->task.block.job.io.flags = IO_READ;
-            return true;
-        } else {
-            assert(status);
-            context_code(ctx, status);
-            context_panic(ctx, ctx->error,
-                          "failed receiving data: %s", ctx->message);
-        }
-    } else if (nrecv == 0) {
-        context_panic(ctx, ERROR_OS,
-                      "failed receiving data: connection reset by peer");
-    } else {
-        req->nrecv = (size_t)nrecv;
-    }
-
-    req->task.block.type = BLOCK_NONE;
-    return false;
-}
-
-
-void sockrecv_reinit(Context *ctx, SockRecv *req, Tcp *tcp,
-                     void *buffer, size_t length, int flags)
-{
-    if (ctx->error)
-        return;
-
-    req->tcp = tcp;
-    req->buffer = buffer;
-    req->length = length;
-    req->flags = flags;
-    req->nrecv = 0;
-}
-
-
-void sockrecv_init(Context *ctx, SockRecv *req, Tcp *tcp,
-                   void *buffer, size_t length, int flags)
-{
-    memset(req, 0, sizeof(*req));
-    if (ctx->error)
-        return;
-
-    req->task._blocked = sockrecv_blocked;
-    sockrecv_reinit(ctx, req, tcp, buffer, length, flags);
-}
-
-
-void sockrecv_deinit(Context *ctx, SockRecv *req)
-{
-    (void)ctx;
-    (void)req;
-}
-
-*/
-
-
-
 typedef enum {
     HTTPGET_START = 0,
     HTTPGET_GETADDR,
@@ -277,7 +93,7 @@ typedef struct {
     Tcp tcp;
     bool has_tcp;
     TcpConnect conn;
-    SockSend send;
+    Write write;
     Read read;
     TcpShutdown shutdown;
 
@@ -583,8 +399,8 @@ static bool httpget_connect_blocked(Context *ctx, HttpGet *req)
         return false;
 
     snprintf(req->buffer, req->buffer_len, format, req->target, req->host);
-    socksend_init(ctx, &req->send, &req->tcp, req->buffer,
-                  strlen(req->buffer), 0);
+    write_init(ctx, &req->write, &req->tcp.stream, req->buffer,
+               (int)strlen(req->buffer));
 
     log_debug(ctx, "connect finished");
     log_debug(ctx, "send started");
@@ -598,8 +414,8 @@ static bool httpget_send_blocked(Context *ctx, HttpGet *req)
     if (ctx->error)
         return false;
 
-    if (task_blocked(ctx, &req->send.task)) {
-        req->task.block = req->send.task.block;
+    if (task_blocked(ctx, &req->write.task)) {
+        req->task.block = req->write.task.block;
         return true;
     }
 
@@ -888,7 +704,7 @@ void httpget_deinit(Context *ctx, HttpGet *req)
         read_deinit(ctx, &req->read);
 
     case HTTPGET_SEND:
-        socksend_deinit(ctx, &req->send);
+        write_deinit(ctx, &req->write);
 
     case HTTPGET_CONNECT:
         tcpconnect_deinit(ctx, &req->conn);

@@ -413,10 +413,24 @@ typedef struct {
 } Read;
 
 typedef struct {
+    Task task;
+    void *stream;
+    void *user;
+    void *buffer;
+    int length;
+    int nwrite;
+} Write;
+
+typedef struct {
     void (*read_init)(Context *ctx, Read *req, void *stream, void *buffer,
                       int length);
     void (*read_reset)(Context *ctx, Read *req, void *buffer, int length);
     void (*read_deinit)(Context *ctx, Read *req);
+
+    void (*write_init)(Context *ctx, Write *req, void *stream, void *buffer,
+                       int length);
+    void (*write_reset)(Context *ctx, Write *req, void *buffer, int length);
+    void (*write_deinit)(Context *ctx, Write *req);
 } StreamType;
 
 typedef struct {
@@ -427,6 +441,11 @@ void read_init(Context *ctx, Read *req, Stream *stream,
                void *buffer, int length);
 void read_reset(Context *ctx, Read *req, void *buffer, int length);
 void read_deinit(Context *ctx, Read *req);
+
+void write_init(Context *ctx, Write *req, Stream *stream,
+               void *buffer, int length);
+void write_reset(Context *ctx, Write *req, void *buffer, int length);
+void write_deinit(Context *ctx, Write *req);
 
 
 /**@}*/

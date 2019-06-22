@@ -13,6 +13,7 @@ static bool tcpconnect_blocked(Context *ctx, Task *task);
 static bool tcpshutdown_blocked(Context *ctx, Task *task);
 static bool tcpread_blocked(Context *ctx, Task *task);
 static bool tcpwrite_blocked(Context *ctx, Task *task);
+static bool tcpstarttls_blocked(Context *ctx, Task *task);
 
 static void tcpread_init(Context *ctx, Read *req, void *stream, void *buffer,
                          int length);
@@ -40,6 +41,7 @@ void tcp_init(Context *ctx, Tcp *tcp, int domain)
     memory_clear(ctx, tcp, sizeof(*tcp));
     tcp->stream.type = &TcpStreamImpl;
     tcp->fd = -1;
+    tcp->tls = NULL;
 
     if (ctx->error) {
         return;
@@ -71,8 +73,7 @@ void tcpconnect_init(Context *ctx, TcpConnect *req, Tcp *tcp,
                      const struct sockaddr *address, int address_len)
 {
     assert(address_len >= 0);
-    (void)ctx;
-    memset(req, 0, sizeof(*req));
+    memory_clear(ctx, req, sizeof(*req));
     req->task._blocked = tcpconnect_blocked;
     req->tcp = tcp;
     req->address = address;
@@ -81,10 +82,10 @@ void tcpconnect_init(Context *ctx, TcpConnect *req, Tcp *tcp,
 }
 
 
-void tcpconnect_deinit(Context *ctx, TcpConnect *conn)
+void tcpconnect_deinit(Context *ctx, TcpConnect *req)
 {
     (void)ctx;
-    (void)conn;
+    (void)req;
 }
 
 
@@ -311,5 +312,32 @@ bool tcpwrite_blocked(Context *ctx, Task *task)
     }
 
     req->task.block.type = BLOCK_NONE;
+    return false;
+}
+
+
+void tcpstarttls_init(Context *ctx, TcpStartTls *req, Tcp *tcp,
+                      TlsContext *tls, TlsMethod method)
+{
+    memory_clear(ctx, req, sizeof(*req));
+    req->task._blocked = tcpstarttls_blocked;
+    req->tcp = tcp;
+    req->tls = tls;
+    req->method = method;
+}
+
+
+void tcpstarttls_deinit(Context *ctx, TcpStartTls *req)
+{
+    (void)ctx;
+    (void)req;
+}
+
+
+bool tcpstarttls_blocked(Context *ctx, Task *task)
+{
+    if (ctx->error)
+        return false;
+    (void)task;
     return false;
 }

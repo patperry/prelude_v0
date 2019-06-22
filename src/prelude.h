@@ -485,6 +485,7 @@ void tlscontext_privatekey_file(Context *ctx, TlsContext *tls,
 typedef struct {
     Stream stream;
     int fd;
+    TlsContext *tls;
 } Tcp;
 
 void tcp_init(Context *ctx, Tcp *tcp, int domain);
@@ -513,6 +514,27 @@ typedef struct {
 void tcpshutdown_init(Context *ctx, TcpShutdown *req, Tcp *tcp,
                       int how);
 void tcpshutdown_deinit(Context *ctx, TcpShutdown *req);
+
+
+typedef struct {
+    Task task;
+    Tcp *tcp;
+    TlsContext *tls;
+    TlsMethod method;
+} TcpStartTls;
+
+void tcpstarttls_init(Context *ctx, TcpStartTls *req, Tcp *tcp,
+                      TlsContext *tls, TlsMethod method);
+void tcpstarttls_deinit(Context *ctx, TcpStartTls *req);
+
+
+typedef struct {
+    Task task;
+    Tcp *tcp;
+} TcpStopTls;
+
+void tcpstoptls_init(Context *ctx, TcpStopTls *req, Tcp *tcp);
+void tcpstoptls_deinit(Context *ctx, TcpStopTls *req);
 
 /**@}*/
 

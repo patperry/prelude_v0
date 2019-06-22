@@ -350,7 +350,7 @@ static bool httpget_open_blocked(Context *ctx, HttpGet *req)
     }
 
     tcpconnect_init(ctx, &req->conn, &req->tcp, req->addrinfo->ai_addr,
-                     req->addrinfo->ai_addrlen);
+                    req->addrinfo->ai_addrlen);
 
     log_debug(ctx, "open finished");
     log_debug(ctx, "connect started");

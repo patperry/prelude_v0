@@ -664,12 +664,12 @@ static void httpget_finish(Context *ctx, HttpGet *req)
 
 bool httpget_blocked(Context *ctx, Task *task)
 {
-    if (ctx->error)
-        return false;
-
     HttpGet *req = (HttpGet *)task;
 
     while (true) {
+        if (ctx->error)
+            return false;
+
         bool (*action)(Context *, HttpGet *);
 
         switch (req->state) {

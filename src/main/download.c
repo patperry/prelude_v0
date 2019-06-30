@@ -62,6 +62,7 @@ typedef enum {
     HTTPGET_GETADDR,
     HTTPGET_OPEN,
     HTTPGET_CONNECT,
+    HTTPGET_STARTTLS,
     HTTPGET_SEND,
     HTTPGET_META,
     HTTPGET_FINISH
@@ -86,13 +87,15 @@ typedef struct {
     HttpGetState state;
     const char *host;
     const char *target;
-    struct addrinfo hints;
+    TlsContext *tls;
 
+    struct addrinfo hints;
     GetAddrInfo getaddr;
     const struct addrinfo *addrinfo;
     Tcp tcp;
     bool has_tcp;
     TcpConnect conn;
+    TcpStartTls starttls;
     Write write;
     Read read;
     TcpShutdown shutdown;
@@ -296,7 +299,7 @@ static bool httpget_start(Context *ctx, HttpGet *req)
     req->hints.ai_flags = PF_UNSPEC;
     req->hints.ai_socktype = SOCK_STREAM;
     req->hints.ai_protocol = IPPROTO_TCP;
-    getaddrinfo_init(ctx, &req->getaddr, req->host, "http", &req->hints);
+    getaddrinfo_init(ctx, &req->getaddr, req->host, "https", &req->hints);
 
     log_debug(ctx, "getaddr started");
     req->state = HTTPGET_GETADDR;
@@ -386,6 +389,32 @@ static bool httpget_connect_blocked(Context *ctx, HttpGet *req)
         return false;
     }
 
+    tcpstarttls_init(ctx, &req->starttls, &req->tcp, req->tls,
+                     TLSMETHOD_CLIENT);
+
+    log_debug(ctx, "connect finished");
+    log_debug(ctx, "starttls started");
+    req->state = HTTPGET_STARTTLS;
+    return false;
+}
+
+
+static bool httpget_starttls_blocked(Context *ctx, HttpGet *req)
+{
+    if (ctx->error)
+        return false;
+
+    if (task_blocked(ctx, &req->starttls.task)) {
+        req->task.block = req->starttls.task.block;
+        return true;
+    }
+
+    if (ctx->error) {
+        context_panic(ctx, ctx->error, "failed starting TLS session: %s",
+                      ctx->message);
+        return false;
+    }
+
     // send request
     const char *format = "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n";
     size_t buffer_len =
@@ -402,7 +431,7 @@ static bool httpget_connect_blocked(Context *ctx, HttpGet *req)
     write_init(ctx, &req->write, &req->tcp.stream, req->buffer,
                (int)strlen(req->buffer));
 
-    log_debug(ctx, "connect finished");
+    log_debug(ctx, "starttls finished");
     log_debug(ctx, "send started");
     req->state = HTTPGET_SEND;
     return false;
@@ -660,6 +689,10 @@ bool httpget_blocked(Context *ctx, Task *task)
             action = httpget_connect_blocked;
             break;
 
+        case HTTPGET_STARTTLS:
+            action = httpget_starttls_blocked;
+            break;
+
         case HTTPGET_SEND:
             action = httpget_send_blocked;
             break;
@@ -680,7 +713,7 @@ bool httpget_blocked(Context *ctx, Task *task)
 
 
 void httpget_init(Context *ctx, HttpGet *req, const char *host,
-                  const char *target)
+                  const char *target, TlsContext *tls)
 {
     memset(req, 0, sizeof(*req));
     if (ctx->error)
@@ -691,6 +724,7 @@ void httpget_init(Context *ctx, HttpGet *req, const char *host,
     req->target = target;
     req->task.block.type = BLOCK_NONE;
     req->task._blocked = httpget_blocked;
+    req->tls = tls;
 }
 
 
@@ -705,6 +739,9 @@ void httpget_deinit(Context *ctx, HttpGet *req)
 
     case HTTPGET_SEND:
         write_deinit(ctx, &req->write);
+
+    case HTTPGET_STARTTLS:
+        tcpstarttls_deinit(ctx, &req->starttls);
 
     case HTTPGET_CONNECT:
         tcpconnect_deinit(ctx, &req->conn);
@@ -735,9 +772,13 @@ int main(int argc, const char **argv)
     Context ctx;
     context_init(&ctx, NULL, NULL, NULL, NULL);
 
+    TlsContext tls;
+    tlscontext_init(&ctx, &tls, TLSMETHOD_CLIENT);
+
     HttpGet req;
-    httpget_init(&ctx, &req, "www.unicode.org",
-                 "/Public/12.0.0/ucd/UnicodeData.txt");
+    //httpget_init(&ctx, &req, "www.unicode.org",
+    //             "/Public/12.0.0/ucd/UnicodeData.txt");
+    httpget_init(&ctx, &req, "www.openssl.org", "/index.html", &tls);
 
     task_await(&ctx, &req.task);
     if (ctx.error)
@@ -767,6 +808,7 @@ exit:
     }
 
     httpget_deinit(&ctx, &req);
+    tlscontext_deinit(&ctx, &tls);
     context_deinit(&ctx);
 
     return status;

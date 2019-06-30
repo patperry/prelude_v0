@@ -7,6 +7,9 @@
 #include <netinet/in.h>
 #include <unistd.h>
 
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+
 #include "prelude.h"
 
 static bool tcpconnect_blocked(Context *ctx, Task *task);
@@ -338,6 +341,46 @@ bool tcpstarttls_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
-    (void)task;
-    return false;
+
+    TcpStartTls *req = (TcpStartTls *)task;
+    Tcp *tcp = req->tcp;
+    SSL *ssl = tcp->_ssl;
+    if (!ssl) {
+        log_debug(ctx, "creating new SSL");
+        ssl = SSL_new(req->tls->_ssl_ctx); // TODO: error check
+        SSL_set_fd(ssl, tcp->fd); // TODO: error check
+        tcp->_ssl = ssl;
+    }
+
+    log_debug(ctx, "starting SSL handshake");
+
+    int ret = SSL_do_handshake(ssl);
+    int status = SSL_get_error(ssl, ret);
+
+    switch (status) {
+    case SSL_ERROR_NONE:
+        log_debug(ctx, "SSL handshake completed");
+        req->task.block.type = BLOCK_NONE;
+        return false;
+
+    case SSL_ERROR_WANT_READ:
+        log_debug(ctx, "SSL handshake requires read");
+        req->task.block.type = BLOCK_IO;
+        req->task.block.job.io.fd = tcp->fd;
+        req->task.block.job.io.flags = IO_READ;
+        return true;
+
+    case SSL_ERROR_WANT_WRITE:
+        log_debug(ctx, "SSL handshake requires write");
+        req->task.block.type = BLOCK_IO;
+        req->task.block.job.io.fd = tcp->fd;
+        req->task.block.job.io.flags = IO_WRITE;
+        return true;
+
+    default:
+        log_debug(ctx, "SSL handshake failed");
+        context_panic(ctx, ERROR_OS, "failed performing TLS handshake");
+        req->task.block.type = BLOCK_NONE;
+        return false;
+    }
 }

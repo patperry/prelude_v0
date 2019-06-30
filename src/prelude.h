@@ -486,6 +486,7 @@ typedef struct {
     Stream stream;
     int fd;
     TlsContext *tls;
+    void *_ssl;
 } Tcp;
 
 void tcp_init(Context *ctx, Tcp *tcp, int domain);

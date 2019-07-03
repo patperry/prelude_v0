@@ -462,40 +462,56 @@ bool tcpstarttls_blocked(Context *ctx, Task *task)
     TcpStartTls *req = (TcpStartTls *)task;
     Tcp *tcp = req->tcp;
     SSL *ssl = tcp->_ssl;
+
     if (!ssl) {
         log_debug(ctx, "creating new SSL");
         ssl = SSL_new(req->tls->_ssl_ctx); // TODO: error check
-        SSL_set_fd(ssl, tcp->fd); // TODO: error check
         tcp->_ssl = ssl;
+
+        SSL_set_fd(ssl, tcp->fd); // TODO: error check
+
+        switch (req->method) {
+        case TLSMETHOD_SERVER:
+            SSL_set_accept_state(ssl);
+            break;
+
+        case TLSMETHOD_CLIENT:
+            SSL_set_connect_state(ssl);
+            break;
+
+        case TLSMETHOD_NONE:
+            return false;
+        }
+        // TODO: error check
     }
 
-    log_debug(ctx, "starting SSL handshake");
+    log_debug(ctx, "continuing TLS handshake");
 
     int ret = SSL_do_handshake(ssl);
     int status = SSL_get_error(ssl, ret);
 
     switch (status) {
     case SSL_ERROR_NONE:
-        log_debug(ctx, "SSL handshake completed");
+        log_debug(ctx, "TLS handshake completed");
         req->task.block.type = BLOCK_NONE;
         return false;
 
     case SSL_ERROR_WANT_READ:
-        log_debug(ctx, "SSL handshake requires read");
+        log_debug(ctx, "TLS handshake requires read");
         req->task.block.type = BLOCK_IO;
         req->task.block.job.io.fd = tcp->fd;
         req->task.block.job.io.flags = IO_READ;
         return true;
 
     case SSL_ERROR_WANT_WRITE:
-        log_debug(ctx, "SSL handshake requires write");
+        log_debug(ctx, "TLS handshake requires write");
         req->task.block.type = BLOCK_IO;
         req->task.block.job.io.fd = tcp->fd;
         req->task.block.job.io.flags = IO_WRITE;
         return true;
 
     default:
-        log_debug(ctx, "SSL handshake failed");
+        log_debug(ctx, "TLS handshake failed");
         context_ssl_panic(ctx, "failed performing TLS handshake");
         req->task.block.type = BLOCK_NONE;
         return false;

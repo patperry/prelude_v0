@@ -19,6 +19,7 @@ static void context_ssl_panic(Context *ctx, const char *format, ...)
 static bool tcpconnect_blocked(Context *ctx, Task *task);
 static bool tcpshutdown_blocked(Context *ctx, Task *task);
 static bool tcpread_blocked(Context *ctx, Task *task);
+static bool tcpreadtls_blocked(Context *ctx, Task *task);
 static bool tcpwrite_blocked(Context *ctx, Task *task);
 static bool tcpwritetls_blocked(Context *ctx, Task *task);
 static bool tcpstarttls_blocked(Context *ctx, Task *task);
@@ -298,7 +299,15 @@ void tcpread_init(Context *ctx, Read *req, void *stream,
     if (ctx->error)
         return;
 
-    req->task._blocked = tcpread_blocked;
+    Tcp *tcp = container_of(req->stream, Tcp, stream);
+
+    if (tcp->tls) {
+        log_debug(ctx, "reading encrypted");
+        req->task._blocked = tcpreadtls_blocked;
+    } else {
+        log_debug(ctx, "reading unencrypted");
+        req->task._blocked = tcpread_blocked;
+    }
     tcpread_reset(ctx, req, buffer, length);
 }
 
@@ -403,6 +412,54 @@ bool tcpread_blocked(Context *ctx, Task *task)
 }
 
 
+bool tcpreadtls_blocked(Context *ctx, Task *task)
+{
+    if (ctx->error)
+        return false;
+
+    Read *req = (Read *)task;
+    Tcp *tcp = container_of(req->stream, Tcp, stream);
+    SSL *ssl = tcp->_ssl;
+
+    if (req->length == 0) {
+        return false;
+    }
+
+    int nrecv = SSL_read(ssl, req->buffer, req->length);
+
+    if (nrecv <= 0) {
+        int status = SSL_get_error(ssl, nrecv);
+        switch (status) {
+        case SSL_ERROR_WANT_READ:
+            log_debug(ctx, "TLS-encrypted read requires read");
+            req->task.block.type = BLOCK_IO;
+            req->task.block.job.io.fd = tcp->fd;
+            req->task.block.job.io.flags = IO_READ;
+            return true;
+
+        case SSL_ERROR_WANT_WRITE:
+            log_debug(ctx, "TLS-encrypted read requires write");
+            req->task.block.type = BLOCK_IO;
+            req->task.block.job.io.fd = tcp->fd;
+            req->task.block.job.io.flags = IO_WRITE;
+            return true;
+
+        default:
+            log_debug(ctx, "TLS-encrypted read failed");
+            context_ssl_panic(ctx, "failed reading data");
+            req->task.block.type = BLOCK_NONE;
+            return false;
+        }
+    } else {
+        log_debug(ctx, "TLS-encrypted read got %d bytes", nrecv);
+        req->nread = nrecv;
+    }
+
+    req->task.block.type = BLOCK_NONE;
+    return false;
+}
+
+
 bool tcpwrite_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
@@ -481,7 +538,7 @@ bool tcpwritetls_blocked(Context *ctx, Task *task)
             return true;
 
         default:
-            log_debug(ctx, "TLS handshake failed");
+            log_debug(ctx, "TLS-encrypted write failed");
             context_ssl_panic(ctx, "failed sending data");
             req->task.block.type = BLOCK_NONE;
             return false;

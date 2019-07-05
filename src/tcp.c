@@ -186,6 +186,10 @@ void tcp_init(Context *ctx, Tcp *tcp, int domain)
 void tcp_deinit(Context *ctx, Tcp *tcp)
 {
     (void)ctx;
+
+    if (tcp->_ssl)
+        SSL_free(tcp->_ssl);
+
     if (tcp->fd >= 0)
         close(tcp->fd);
 }
@@ -274,6 +278,44 @@ bool tcpshutdown_blocked(Context *ctx, Task *task)
         return false;
 
     TcpShutdown *req = (TcpShutdown *)task;
+    Tcp *tcp = req->tcp;
+
+    if (tcp->_ssl) {
+        SSL *ssl = tcp->_ssl;
+
+        log_debug(ctx, "sending TLS close notify");
+        int ret = SSL_shutdown(ssl);
+
+        if (ret < 0) {
+            int status = SSL_get_error(ssl, ret);
+            switch (status) {
+            case SSL_ERROR_WANT_READ:
+                log_debug(ctx, "TLS close notify requires read");
+                req->task.block.type = BLOCK_IO;
+                req->task.block.job.io.fd = tcp->fd;
+                req->task.block.job.io.flags = IO_READ;
+                return true;
+
+            case SSL_ERROR_WANT_WRITE:
+                log_debug(ctx, "TLS close notify requires write");
+                req->task.block.type = BLOCK_IO;
+                req->task.block.job.io.fd = tcp->fd;
+                req->task.block.job.io.flags = IO_WRITE;
+                return true;
+
+            default:
+                log_debug(ctx, "TLS close notify failed");
+                context_ssl_panic(ctx, "failed closing TLS session");
+                req->task.block.type = BLOCK_NONE;
+                return false;
+            }
+        } else {
+            log_debug(ctx, "TLS close notify sent");
+            SSL_free(ssl);
+            tcp->_ssl = NULL;
+        }
+    }
+
     if (shutdown(req->tcp->fd, req->how) < 0) {
         int status = errno;
         if (status != ENOTCONN) { // peer closed the connection
@@ -301,7 +343,7 @@ void tcpread_init(Context *ctx, Read *req, void *stream,
 
     Tcp *tcp = container_of(req->stream, Tcp, stream);
 
-    if (tcp->tls) {
+    if (tcp->_ssl) {
         log_debug(ctx, "reading encrypted");
         req->task._blocked = tcpreadtls_blocked;
     } else {
@@ -342,7 +384,7 @@ void tcpwrite_init(Context *ctx, Write *req, void *stream,
 
     Tcp *tcp = container_of(req->stream, Tcp, stream);
     
-    if (tcp->tls) {
+    if (tcp->_ssl) {
         log_debug(ctx, "writing encrypted");
         req->task._blocked = tcpwritetls_blocked;
     } else {

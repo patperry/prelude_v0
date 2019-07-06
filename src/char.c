@@ -147,6 +147,7 @@ const uint8_t *char_scan_utf8(Context *ctx, const uint8_t *ptr,
             // expecting a byte between 80 and 8F
             goto inval_cont;
         }
+        break;
     default:
         if ((ch & 0xC0) != 0x80) {
             // expecting a byte between 80 and BF

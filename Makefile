@@ -3,10 +3,10 @@ CC += -std=c99
 MKDIR_P = mkdir -p
 RANLIB = ranlib
 
-LIBS += -lm -lssl -lcrypto
-CFLAGS += -Wall -Wextra -pedantic -Werror -g
-CPPFLAGS += -Isrc -I/usr/local/opt/libressl/include
-LDFLAGS += -g -L/usr/local/opt/libressl/lib
+LIBS += -lm `pkg-config --libs openssl`
+CFLAGS += -Wall -Wextra -pedantic -Werror -g `pkg-config --cflags openssl`
+CPPFLAGS += -Isrc
+LDFLAGS += -g `pkg-config --ldflags openssl`
 
 LIBRARY_A = src/library.a
 LIBRARY_O = src/array.o src/async.o src/char.o src/context.o src/dns.o \

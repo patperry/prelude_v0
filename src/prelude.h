@@ -406,50 +406,6 @@ typedef struct {
 /* https://nachtimwald.com/2014/10/06/client-side-session-cache-in-openssl/ */
 /* https://nachtimwald.com/2014/10/05/server-side-session-cache-in-openssl/ */
 
-typedef struct {
-    Task task;
-    void *stream;
-    void *user;
-    void *buffer;
-    int length;
-    int nread;
-} Read;
-
-typedef struct {
-    Task task;
-    void *stream;
-    void *user;
-    void *buffer;
-    int length;
-    int nwrite;
-} Write;
-
-typedef struct {
-    void (*read_init)(Context *ctx, Read *req, void *stream, void *buffer,
-                      int length);
-    void (*read_reset)(Context *ctx, Read *req, void *buffer, int length);
-    void (*read_deinit)(Context *ctx, Read *req);
-
-    void (*write_init)(Context *ctx, Write *req, void *stream, void *buffer,
-                       int length);
-    void (*write_reset)(Context *ctx, Write *req, void *buffer, int length);
-    void (*write_deinit)(Context *ctx, Write *req);
-} StreamType;
-
-typedef struct {
-    StreamType *type;
-} Stream;
-
-void read_init(Context *ctx, Read *req, Stream *stream,
-               void *buffer, int length);
-void read_reset(Context *ctx, Read *req, void *buffer, int length);
-void read_deinit(Context *ctx, Read *req);
-
-void write_init(Context *ctx, Write *req, Stream *stream,
-               void *buffer, int length);
-void write_reset(Context *ctx, Write *req, void *buffer, int length);
-void write_deinit(Context *ctx, Write *req);
-
 
 /**@}*/
 
@@ -501,7 +457,6 @@ typedef enum {
 } SocketType;
 
 typedef struct {
-    Stream stream;
     SocketType type;
     int fd;
     TlsContext *tls;
@@ -522,7 +477,6 @@ typedef struct {
 void sockconnect_init(Context *ctx, SockConnect *req, Socket *sock,
                       const struct sockaddr *address, int address_len);
 void sockconnect_deinit(Context *ctx, SockConnect *conn);
-
 
 typedef struct {
     Task task;
@@ -550,6 +504,33 @@ typedef struct {
 
 void sockstoptls_init(Context *ctx, SockStopTls *req, Socket *sock);
 void sockstoptls_deinit(Context *ctx, SockStopTls *req);
+
+typedef struct {
+    Task task;
+    Socket *sock;
+    void *buffer;
+    int length;
+    int nrecv;
+} SockRecv;
+
+void sockrecv_init(Context *ctx, SockRecv *req, Socket *sock, void *buffer,
+                   int length);
+void sockrecv_reset(Context *ctx, SockRecv *req, void *buffer, int length);
+void sockrecv_deinit(Context *ctx, SockRecv *req);
+
+typedef struct {
+    Task task;
+    Socket *sock;
+    void *buffer;
+    int length;
+    int nsend;
+} SockSend;
+
+void socksend_init(Context *ctx, SockSend *req, Socket *sock, void *buffer,
+                   int length);
+void socksend_reset(Context *ctx, SockSend *req, void *buffer, int length);
+void socksend_deinit(Context *ctx, SockSend *req);
+
 
 /**@}*/
 

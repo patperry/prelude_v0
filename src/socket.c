@@ -18,32 +18,14 @@ static void context_ssl_panic(Context *ctx, const char *format, ...)
 
 static bool sockconnect_blocked(Context *ctx, Task *task);
 static bool sockshutdown_blocked(Context *ctx, Task *task);
-static bool sockread_blocked(Context *ctx, Task *task);
-static bool sockreadtls_blocked(Context *ctx, Task *task);
-static bool sockwrite_blocked(Context *ctx, Task *task);
-static bool sockwritetls_blocked(Context *ctx, Task *task);
+static bool sockrecv_blocked(Context *ctx, Task *task);
+static bool sockrecvtls_blocked(Context *ctx, Task *task);
+static bool socksend_blocked(Context *ctx, Task *task);
+static bool socksendtls_blocked(Context *ctx, Task *task);
 static bool sockstarttls_blocked(Context *ctx, Task *task);
 
-static void sockread_init(Context *ctx, Read *req, void *stream, void *buffer,
-                         int length);
-static void sockread_reset(Context *ctx, Read *req, void *buffer, int length);
-static void sockread_deinit(Context *ctx, Read *req);
-
-static void sockwrite_init(Context *ctx, Write *req, void *stream, void *buffer,
-                          int length);
-static void sockwrite_reset(Context *ctx, Write *req, void *buffer, int length);
-static void sockwrite_deinit(Context *ctx, Write *req);
 
 static bool OpenSSL_Initialized = false; // TODO: thread safe?
-
-static StreamType SockStreamImpl = {
-    sockread_init,
-    sockread_reset,
-    sockread_deinit,
-    sockwrite_init,
-    sockwrite_reset,
-    sockwrite_deinit
-};
 
 
 void context_ssl_panic(Context *ctx, const char *format, ...)
@@ -182,7 +164,6 @@ void socket_init(Context *ctx, Socket *sock, SocketType type, int family)
 {
     memory_clear(ctx, sock, sizeof(*sock));
     sock->type = type;
-    sock->stream.type = &SockStreamImpl;
     sock->fd = -1;
     sock->tls = NULL;
 
@@ -368,30 +349,28 @@ bool sockshutdown_blocked(Context *ctx, Task *task)
 }
 
 
-void sockread_init(Context *ctx, Read *req, void *stream,
+void sockrecv_init(Context *ctx, SockRecv *req, Socket *sock,
                   void *buffer, int length)
 {
     assert(length >= 0);
 
     memory_clear(ctx, req, sizeof(*req));
-    req->stream = stream;
+    req->sock = sock;
     if (ctx->error)
         return;
-
-    Socket *sock = container_of(req->stream, Socket, stream);
 
     if (sock->_ssl) {
         log_debug(ctx, "reading encrypted");
-        req->task._blocked = sockreadtls_blocked;
+        req->task._blocked = sockrecvtls_blocked;
     } else {
         log_debug(ctx, "reading unencrypted");
-        req->task._blocked = sockread_blocked;
+        req->task._blocked = sockrecv_blocked;
     }
-    sockread_reset(ctx, req, buffer, length);
+    sockrecv_reset(ctx, req, buffer, length);
 }
 
 
-void sockread_reset(Context *ctx, Read *req, void *buffer, int length)
+void sockrecv_reset(Context *ctx, SockRecv *req, void *buffer, int length)
 {
     assert(length >= 0);
 
@@ -400,39 +379,37 @@ void sockread_reset(Context *ctx, Read *req, void *buffer, int length)
 
     req->buffer = buffer;
     req->length = length;
-    req->nread = 0;
+    req->nrecv = 0;
 }
 
 
-void sockread_deinit(Context *ctx, Read *req)
+void sockrecv_deinit(Context *ctx, SockRecv *req)
 {
     (void)ctx;
     (void)req;
 }
 
 
-void sockwrite_init(Context *ctx, Write *req, void *stream,
+void socksend_init(Context *ctx, SockSend *req, Socket *sock,
                    void *buffer, int length)
 {
     memset(req, 0, sizeof(*req));
-    req->stream = stream;
+    req->sock = sock;
     if (ctx->error)
         return;
-
-    Socket *sock = container_of(req->stream, Socket, stream);
     
     if (sock->_ssl) {
         log_debug(ctx, "writing encrypted");
-        req->task._blocked = sockwritetls_blocked;
+        req->task._blocked = socksendtls_blocked;
     } else {
         log_debug(ctx, "writing unencrypted");
-        req->task._blocked = sockwrite_blocked;
+        req->task._blocked = socksend_blocked;
     }
-    sockwrite_reset(ctx, req, buffer, length);
+    socksend_reset(ctx, req, buffer, length);
 }
 
 
-void sockwrite_reset(Context *ctx, Write *req, void *buffer, int length)
+void socksend_reset(Context *ctx, SockSend *req, void *buffer, int length)
 {
     assert(length >= 0);
 
@@ -441,24 +418,24 @@ void sockwrite_reset(Context *ctx, Write *req, void *buffer, int length)
 
     req->buffer = buffer;
     req->length = length;
-    req->nwrite = 0;
+    req->nsend = 0;
 }
 
 
-void sockwrite_deinit(Context *ctx, Write *req)
+void socksend_deinit(Context *ctx, SockSend *req)
 {
     (void)ctx;
     (void)req;
 }
 
 
-bool sockread_blocked(Context *ctx, Task *task)
+bool sockrecv_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
 
-    Read *req = (Read *)task;
-    Socket *sock = container_of(req->stream, Socket, stream);
+    SockRecv *req = (SockRecv *)task;
+    Socket *sock = req->sock;
 
     if (req->length == 0) {
         return false;
@@ -483,7 +460,7 @@ bool sockread_blocked(Context *ctx, Task *task)
         context_panic(ctx, ERROR_OS,
                       "failed receiving data: connection reset by peer");
     } else {
-        req->nread = nrecv;
+        req->nrecv = nrecv;
     }
 
     req->task.block.type = BLOCK_NONE;
@@ -491,13 +468,13 @@ bool sockread_blocked(Context *ctx, Task *task)
 }
 
 
-bool sockreadtls_blocked(Context *ctx, Task *task)
+bool sockrecvtls_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
 
-    Read *req = (Read *)task;
-    Socket *sock = container_of(req->stream, Socket, stream);
+    SockRecv *req = (SockRecv *)task;
+    Socket *sock = req->sock;
     SSL *ssl = sock->_ssl;
 
     if (req->length == 0) {
@@ -531,7 +508,7 @@ bool sockreadtls_blocked(Context *ctx, Task *task)
         }
     } else {
         log_debug(ctx, "TLS-encrypted read got %d bytes", nrecv);
-        req->nread = nrecv;
+        req->nrecv = nrecv;
     }
 
     req->task.block.type = BLOCK_NONE;
@@ -539,16 +516,16 @@ bool sockreadtls_blocked(Context *ctx, Task *task)
 }
 
 
-bool sockwrite_blocked(Context *ctx, Task *task)
+bool socksend_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
 
-    Write *req = (Write *)task;
-    Socket *sock = container_of(req->stream, Socket, stream);
+    SockSend *req = (SockSend *)task;
+    Socket *sock = req->sock;
     
-    const void *buffer = (const char *)req->buffer + req->nwrite;
-    int length = req->length - req->nwrite;
+    const void *buffer = (const char *)req->buffer + req->nsend;
+    int length = req->length - req->nsend;
 
     if (length == 0) {
         return false;
@@ -570,8 +547,8 @@ bool sockwrite_blocked(Context *ctx, Task *task)
                           "failed sending data: %s", ctx->message);
         }
     } else {
-        req->nwrite += nsend;
-        if (req->nwrite < req->length) {
+        req->nsend += nsend;
+        if (req->nsend < req->length) {
             return true;
         }
     }
@@ -581,17 +558,17 @@ bool sockwrite_blocked(Context *ctx, Task *task)
 }
 
 
-bool sockwritetls_blocked(Context *ctx, Task *task)
+bool socksendtls_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
 
-    Write *req = (Write *)task;
-    Socket *sock = container_of(req->stream, Socket, stream);
+    SockSend *req = (SockSend *)task;
+    Socket *sock = req->sock;
     SSL *ssl = sock->_ssl;
     
-    const void *buffer = (const char *)req->buffer + req->nwrite;
-    int length = req->length - req->nwrite;
+    const void *buffer = (const char *)req->buffer + req->nsend;
+    int length = req->length - req->nsend;
 
     if (length == 0) {
         return false;
@@ -624,8 +601,8 @@ bool sockwritetls_blocked(Context *ctx, Task *task)
         }
     } else {
         log_debug(ctx, "TLS-encrypted write wrote %d bytes", nsend);
-        req->nwrite += nsend;
-        if (req->nwrite < req->length) {
+        req->nsend += nsend;
+        if (req->nsend < req->length) {
             return true;
         }
     }

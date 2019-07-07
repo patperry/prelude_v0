@@ -160,10 +160,10 @@ void tlscontext_privatekey_file(Context *ctx, TlsContext *tls,
 
 
 
-void socket_init(Context *ctx, Socket *sock, SocketType type, int family)
+void socket_init(Context *ctx, Socket *sock, SocketType type,
+                 IpAddrType family)
 {
     memory_clear(ctx, sock, sizeof(*sock));
-    sock->type = type;
     sock->fd = -1;
     sock->tls = NULL;
 
@@ -171,8 +171,25 @@ void socket_init(Context *ctx, Socket *sock, SocketType type, int family)
         return;
     }
 
+    sock->type = type;
+    sock->family = family;
+
+    int socket_family;
     int socket_type;
     int protocol;
+
+    switch (family) {
+    case IPADDR_V4:
+        socket_family = PF_INET;
+        break;
+
+    case IPADDR_V6:
+        socket_family = PF_INET6;
+        break;
+
+    default:
+        return;
+    }
 
     switch (type) {
     case SOCKET_TCP:
@@ -189,7 +206,7 @@ void socket_init(Context *ctx, Socket *sock, SocketType type, int family)
         return;
     }
 
-    sock->fd = socket(family, socket_type, protocol);
+    sock->fd = socket(socket_family, socket_type, protocol);
     if (sock->fd < 0) {
         int status = errno;
         context_panic(ctx, error_code(status),

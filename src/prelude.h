@@ -414,6 +414,7 @@ typedef struct {
  */
 
 typedef enum {
+    TLSFILE_NONE = 0,
     TLSFILE_PEM,
     TLSFILE_ASN1
 } TlsFileType;
@@ -448,7 +449,13 @@ void tlscontext_privatekey_file(Context *ctx, TlsContext *tls,
 
 /**
  * \defgroup sockets
- */ 
+ */
+
+typedef enum {
+    IPADDR_NONE = 0,
+    IPADDR_V4,
+    IPADDR_V6
+} IpAddrType;
 
 typedef enum {
     SOCKET_NONE = 0,
@@ -458,12 +465,14 @@ typedef enum {
 
 typedef struct {
     SocketType type;
+    IpAddrType family;
     int fd;
     TlsContext *tls;
     void *_ssl;
 } Socket;
 
-void socket_init(Context *ctx, Socket *sock, SocketType type, int family);
+void socket_init(Context *ctx, Socket *sock, SocketType type,
+                 IpAddrType family);
 void socket_deinit(Context *ctx, Socket *sock);
 
 typedef struct {

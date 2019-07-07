@@ -340,12 +340,29 @@ static bool httpget_open_blocked(Context *ctx, HttpGet *req)
         assert(ai->ai_socktype == SOCK_STREAM);
         assert(ai->ai_protocol == IPPROTO_TCP);
 
-        socket_init(ctx, &req->sock, SOCKET_TCP, ai->ai_family);
-        if (ctx->error) {
-            socket_deinit(ctx, &req->sock);
-            req->addrinfo = req->addrinfo->ai_next;
+        int family;
+        switch (ai->ai_family) {
+        case PF_INET:
+            family = IPADDR_V4;
+            break;
+        case PF_INET6:
+            family = IPADDR_V6;
+            break;
+        default:
+            family = IPADDR_NONE;
+            break;
+        }
+
+        if (family) {
+            socket_init(ctx, &req->sock, SOCKET_TCP, family);
+            if (ctx->error) {
+                socket_deinit(ctx, &req->sock);
+                req->addrinfo = req->addrinfo->ai_next;
+            } else {
+                req->has_sock = true;
+            }
         } else {
-            req->has_sock = true;
+            req->addrinfo = req->addrinfo->ai_next;
         }
     }
 

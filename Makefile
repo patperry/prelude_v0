@@ -10,7 +10,7 @@ LDFLAGS += -g
 
 LIBRARY_A = src/library.a
 LIBRARY_O = src/array.o src/async.o src/char.o src/context.o src/dns.o \
-			src/log.o src/memory.o src/stream.o src/tcp.o src/text.o \
+			src/log.o src/memory.o src/socket.o src/stream.o src/text.o \
 			src/textalloc.o src/textbuild.o src/textiter.o
 
 LUASRC = lib/lua-5.3.5/src

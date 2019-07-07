@@ -93,13 +93,13 @@ typedef struct {
     struct addrinfo hints;
     GetAddrInfo getaddr;
     const struct addrinfo *addrinfo;
-    Tcp tcp;
-    bool has_tcp;
-    TcpConnect conn;
-    TcpStartTls starttls;
+    Socket sock;
+    bool has_sock;
+    SockConnect conn;
+    SockStartTls starttls;
     Write write;
     Read read;
-    TcpShutdown shutdown;
+    SockShutdown shutdown;
 
     const char *status;
     size_t status_len;
@@ -333,27 +333,27 @@ static bool httpget_open_blocked(Context *ctx, HttpGet *req)
         return false;
 
     assert(req->addrinfo);
-    req->has_tcp = false;
+    req->has_sock = false;
 
-    while (!req->has_tcp  && req->addrinfo) {
+    while (!req->has_sock  && req->addrinfo) {
         const struct addrinfo *ai = req->addrinfo;
         assert(ai->ai_socktype == SOCK_STREAM);
         assert(ai->ai_protocol == IPPROTO_TCP);
 
-        tcp_init(ctx, &req->tcp, ai->ai_family);
+        socket_init(ctx, &req->sock, SOCKET_TCP, ai->ai_family);
         if (ctx->error) {
-            tcp_deinit(ctx, &req->tcp);
+            socket_deinit(ctx, &req->sock);
             req->addrinfo = req->addrinfo->ai_next;
         } else {
-            req->has_tcp = true;
+            req->has_sock = true;
         }
     }
 
-    if (!req->has_tcp) {
+    if (!req->has_sock) {
         return false;
     }
 
-    tcpconnect_init(ctx, &req->conn, &req->tcp, req->addrinfo->ai_addr,
+    sockconnect_init(ctx, &req->conn, &req->sock, req->addrinfo->ai_addr,
                     req->addrinfo->ai_addrlen);
 
     log_debug(ctx, "open finished");
@@ -378,9 +378,9 @@ static bool httpget_connect_blocked(Context *ctx, HttpGet *req)
 
         if (req->addrinfo) {
             context_recover(ctx);
-            tcpconnect_deinit(ctx, &req->conn);
-            tcp_deinit(ctx, &req->tcp);
-            req->has_tcp = false;
+            sockconnect_deinit(ctx, &req->conn);
+            socket_deinit(ctx, &req->sock);
+            req->has_sock = false;
             req->state = HTTPGET_OPEN;
         } else {
             context_panic(ctx, ctx->error, "failed connecting to host: %s",
@@ -390,7 +390,7 @@ static bool httpget_connect_blocked(Context *ctx, HttpGet *req)
         return false;
     }
 
-    tcpstarttls_init(ctx, &req->starttls, &req->tcp, req->tls,
+    sockstarttls_init(ctx, &req->starttls, &req->sock, req->tls,
                      TLSMETHOD_CLIENT);
 
     log_debug(ctx, "connect finished");
@@ -429,7 +429,7 @@ static bool httpget_starttls_blocked(Context *ctx, HttpGet *req)
         return false;
 
     snprintf(req->buffer, req->buffer_len, format, req->target, req->host);
-    write_init(ctx, &req->write, &req->tcp.stream, req->buffer,
+    write_init(ctx, &req->write, &req->sock.stream, req->buffer,
                (int)strlen(req->buffer));
 
     log_debug(ctx, "starttls finished");
@@ -454,7 +454,7 @@ static bool httpget_send_blocked(Context *ctx, HttpGet *req)
     req->data_max = req->buffer_len;
 
     assert(req->data_max >= BUFFER_LEN);
-    read_init(ctx, &req->read, &req->tcp.stream, req->data, BUFFER_LEN);
+    read_init(ctx, &req->read, &req->sock.stream, req->data, BUFFER_LEN);
 
     log_debug(ctx, "send finished");
     log_debug(ctx, "meta started");
@@ -595,7 +595,7 @@ bool httpget_advance(Context *ctx, HttpGet *req)
         size_t buffer_len = tail_len > BUFFER_LEN ? BUFFER_LEN : tail_len;
         read_reset(ctx, &req->read, buffer, buffer_len);
     } else {
-        tcpshutdown_init(ctx, &req->shutdown, &req->tcp, SHUT_RDWR);
+        sockshutdown_init(ctx, &req->shutdown, &req->sock);
     }
 
     req->content_started = true;
@@ -745,16 +745,16 @@ void httpget_deinit(Context *ctx, HttpGet *req)
         /* fall through */
 
     case HTTPGET_STARTTLS:
-        tcpstarttls_deinit(ctx, &req->starttls);
+        sockstarttls_deinit(ctx, &req->starttls);
         /* fall through */
 
     case HTTPGET_CONNECT:
-        tcpconnect_deinit(ctx, &req->conn);
+        sockconnect_deinit(ctx, &req->conn);
         /* fall through */
 
     case HTTPGET_OPEN:
-        if (req->has_tcp)
-            tcp_deinit(ctx, &req->tcp);
+        if (req->has_sock)
+            socket_deinit(ctx, &req->sock);
         /* fall through */
 
     case HTTPGET_GETADDR:
@@ -781,7 +781,7 @@ int main(int argc, const char **argv)
     context_init(&ctx, NULL, NULL, NULL, NULL);
 
     TlsContext tls;
-    tlscontext_init(&ctx, &tls, TLSMETHOD_CLIENT);
+    tlscontext_init(&ctx, &tls, TLSPROTO_TLS, TLSMETHOD_CLIENT);
 
     HttpGet req;
     //httpget_init(&ctx, &req, "www.unicode.org",

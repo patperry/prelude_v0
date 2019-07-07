@@ -16,33 +16,33 @@ static int ssl_filetype(TlsFileType type);
 static void context_ssl_panic(Context *ctx, const char *format, ...)
     __attribute__ ((format (printf, 2, 3)));
 
-static bool tcpconnect_blocked(Context *ctx, Task *task);
-static bool tcpshutdown_blocked(Context *ctx, Task *task);
-static bool tcpread_blocked(Context *ctx, Task *task);
-static bool tcpreadtls_blocked(Context *ctx, Task *task);
-static bool tcpwrite_blocked(Context *ctx, Task *task);
-static bool tcpwritetls_blocked(Context *ctx, Task *task);
-static bool tcpstarttls_blocked(Context *ctx, Task *task);
+static bool sockconnect_blocked(Context *ctx, Task *task);
+static bool sockshutdown_blocked(Context *ctx, Task *task);
+static bool sockread_blocked(Context *ctx, Task *task);
+static bool sockreadtls_blocked(Context *ctx, Task *task);
+static bool sockwrite_blocked(Context *ctx, Task *task);
+static bool sockwritetls_blocked(Context *ctx, Task *task);
+static bool sockstarttls_blocked(Context *ctx, Task *task);
 
-static void tcpread_init(Context *ctx, Read *req, void *stream, void *buffer,
+static void sockread_init(Context *ctx, Read *req, void *stream, void *buffer,
                          int length);
-static void tcpread_reset(Context *ctx, Read *req, void *buffer, int length);
-static void tcpread_deinit(Context *ctx, Read *req);
+static void sockread_reset(Context *ctx, Read *req, void *buffer, int length);
+static void sockread_deinit(Context *ctx, Read *req);
 
-static void tcpwrite_init(Context *ctx, Write *req, void *stream, void *buffer,
+static void sockwrite_init(Context *ctx, Write *req, void *stream, void *buffer,
                           int length);
-static void tcpwrite_reset(Context *ctx, Write *req, void *buffer, int length);
-static void tcpwrite_deinit(Context *ctx, Write *req);
+static void sockwrite_reset(Context *ctx, Write *req, void *buffer, int length);
+static void sockwrite_deinit(Context *ctx, Write *req);
 
 static bool OpenSSL_Initialized = false; // TODO: thread safe?
 
-static StreamType TcpStreamImpl = {
-    tcpread_init,
-    tcpread_reset,
-    tcpread_deinit,
-    tcpwrite_init,
-    tcpwrite_reset,
-    tcpwrite_deinit
+static StreamType SockStreamImpl = {
+    sockread_init,
+    sockread_reset,
+    sockread_deinit,
+    sockwrite_init,
+    sockwrite_reset,
+    sockwrite_deinit
 };
 
 
@@ -78,10 +78,16 @@ int ssl_filetype(TlsFileType type)
 }
 
 
-void tlscontext_init(Context *ctx, TlsContext *tls, TlsMethod method)
+void tlscontext_init(Context *ctx, TlsContext *tls, TlsProto proto,
+                     TlsMethod method)
 {
     memory_clear(ctx, tls, sizeof(*tls));
     if (ctx->error)
+        return;
+
+    tls->proto = proto;
+    tls->method = method;
+    if (!tls->proto)
         return;
 
     if (!OpenSSL_Initialized) {
@@ -92,16 +98,30 @@ void tlscontext_init(Context *ctx, TlsContext *tls, TlsMethod method)
     }
 
     const SSL_METHOD *ssl_method;
-    switch (method) {
-    case TLSMETHOD_NONE:
-        ssl_method = TLS_method();
-        break;
-    case TLSMETHOD_SERVER:
-        ssl_method = TLS_server_method();
-        break;
-    case TLSMETHOD_CLIENT:
-        ssl_method = TLS_client_method();
-        break;
+    if (proto == TLSPROTO_DTLS) {
+        switch (method) {
+        case TLSMETHOD_NONE:
+            ssl_method = DTLS_method();
+            break;
+        case TLSMETHOD_SERVER:
+            ssl_method = DTLS_server_method();
+            break;
+        case TLSMETHOD_CLIENT:
+            ssl_method = DTLS_client_method();
+            break;
+        }
+    } else {
+        switch (method) {
+        case TLSMETHOD_NONE:
+            ssl_method = TLS_method();
+            break;
+        case TLSMETHOD_SERVER:
+            ssl_method = TLS_server_method();
+            break;
+        case TLSMETHOD_CLIENT:
+            ssl_method = TLS_client_method();
+            break;
+        }
     }
 
     SSL_CTX *ssl_ctx = SSL_CTX_new(ssl_method);
@@ -158,78 +178,97 @@ void tlscontext_privatekey_file(Context *ctx, TlsContext *tls,
 
 
 
-void tcp_init(Context *ctx, Tcp *tcp, int domain)
+void socket_init(Context *ctx, Socket *sock, SocketType type, int family)
 {
-    memory_clear(ctx, tcp, sizeof(*tcp));
-    tcp->stream.type = &TcpStreamImpl;
-    tcp->fd = -1;
-    tcp->tls = NULL;
+    memory_clear(ctx, sock, sizeof(*sock));
+    sock->type = type;
+    sock->stream.type = &SockStreamImpl;
+    sock->fd = -1;
+    sock->tls = NULL;
 
     if (ctx->error) {
         return;
     }
 
-    tcp->fd = socket(domain, SOCK_STREAM, IPPROTO_TCP);
-    if (tcp->fd < 0) {
-        int status = errno;
-        context_panic(ctx, error_code(status),
-                      "failed opening tcp: %s", strerror(status));
+    int socket_type;
+    int protocol;
+
+    switch (type) {
+    case SOCKET_TCP:
+        socket_type = SOCK_STREAM;
+        protocol = IPPROTO_TCP;
+        break;
+
+    case SOCKET_UDP:
+        socket_type = SOCK_DGRAM;
+        protocol = IPPROTO_UDP;
+        break;
+
+    default:
+        return;
     }
 
-    int flags = fcntl(tcp->fd, F_GETFL, 0);
+    sock->fd = socket(family, socket_type, protocol);
+    if (sock->fd < 0) {
+        int status = errno;
+        context_panic(ctx, error_code(status),
+                      "failed opening sock: %s", strerror(status));
+    }
+
+    int flags = fcntl(sock->fd, F_GETFL, 0);
     if (flags >= 0) {
-        fcntl(tcp->fd, F_SETFL, flags | O_NONBLOCK); // ignore error
+        fcntl(sock->fd, F_SETFL, flags | O_NONBLOCK); // ignore error
     }
 }
 
 
-void tcp_deinit(Context *ctx, Tcp *tcp)
+void socket_deinit(Context *ctx, Socket *sock)
 {
     (void)ctx;
 
-    if (tcp->_ssl)
-        SSL_free(tcp->_ssl);
+    if (sock->_ssl)
+        SSL_free(sock->_ssl);
 
-    if (tcp->fd >= 0)
-        close(tcp->fd);
+    if (sock->fd >= 0)
+        close(sock->fd);
 }
 
 
-void tcpconnect_init(Context *ctx, TcpConnect *req, Tcp *tcp,
+void sockconnect_init(Context *ctx, SockConnect *req, Socket *sock,
                      const struct sockaddr *address, int address_len)
 {
     assert(address_len >= 0);
     memory_clear(ctx, req, sizeof(*req));
-    req->task._blocked = tcpconnect_blocked;
-    req->tcp = tcp;
+    req->task._blocked = sockconnect_blocked;
+    req->sock = sock;
     req->address = address;
     req->address_len = address_len;
     req->started = false;
 }
 
 
-void tcpconnect_deinit(Context *ctx, TcpConnect *req)
+void sockconnect_deinit(Context *ctx, SockConnect *req)
 {
     (void)ctx;
     (void)req;
 }
 
 
-bool tcpconnect_blocked(Context *ctx, Task *task)
+bool sockconnect_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
 
-    TcpConnect *req = (TcpConnect *)task;
+    SockConnect *req = (SockConnect *)task;
 
-    if (connect(req->tcp->fd, req->address,
+    if (connect(req->sock->fd, req->address,
                 (socklen_t)req->address_len) < 0) {
         int status = errno;
 
         if (!req->started) {
             if (status == EINPROGRESS) {
                 req->task.block.type = BLOCK_IO;
-                req->task.block.job.io.fd = req->tcp->fd;
+                req->task.block.job.io.fd = req->sock->fd;
                 req->task.block.job.io.flags = IO_WRITE;
                 req->started = true;
                 return true;
@@ -252,36 +291,34 @@ exit:
 }
 
 
-void tcpshutdown_init(Context *ctx, TcpShutdown *req, Tcp *tcp,
-                         int how)
+void sockshutdown_init(Context *ctx, SockShutdown *req, Socket *sock)
 {
     memset(req, 0, sizeof(*req));
     if (ctx->error)
         return;
 
-    req->task._blocked = tcpshutdown_blocked;
-    req->tcp = tcp;
-    req->how = how;
+    req->task._blocked = sockshutdown_blocked;
+    req->sock = sock;
 }
 
 
-void tcpshutdown_deinit(Context *ctx, TcpShutdown *req)
+void sockshutdown_deinit(Context *ctx, SockShutdown *req)
 {
     (void)ctx;
     (void)req;
 }
 
 
-bool tcpshutdown_blocked(Context *ctx, Task *task)
+bool sockshutdown_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
 
-    TcpShutdown *req = (TcpShutdown *)task;
-    Tcp *tcp = req->tcp;
+    SockShutdown *req = (SockShutdown *)task;
+    Socket *sock = req->sock;
 
-    if (tcp->_ssl) {
-        SSL *ssl = tcp->_ssl;
+    if (sock->_ssl) {
+        SSL *ssl = sock->_ssl;
 
         log_debug(ctx, "sending TLS close notify");
         int ret = SSL_shutdown(ssl);
@@ -292,14 +329,14 @@ bool tcpshutdown_blocked(Context *ctx, Task *task)
             case SSL_ERROR_WANT_READ:
                 log_debug(ctx, "TLS close notify requires read");
                 req->task.block.type = BLOCK_IO;
-                req->task.block.job.io.fd = tcp->fd;
+                req->task.block.job.io.fd = sock->fd;
                 req->task.block.job.io.flags = IO_READ;
                 return true;
 
             case SSL_ERROR_WANT_WRITE:
                 log_debug(ctx, "TLS close notify requires write");
                 req->task.block.type = BLOCK_IO;
-                req->task.block.job.io.fd = tcp->fd;
+                req->task.block.job.io.fd = sock->fd;
                 req->task.block.job.io.flags = IO_WRITE;
                 return true;
 
@@ -312,11 +349,11 @@ bool tcpshutdown_blocked(Context *ctx, Task *task)
         } else {
             log_debug(ctx, "TLS close notify sent");
             SSL_free(ssl);
-            tcp->_ssl = NULL;
+            sock->_ssl = NULL;
         }
     }
 
-    if (shutdown(req->tcp->fd, req->how) < 0) {
+    if (shutdown(req->sock->fd, SHUT_RDWR) < 0) {
         int status = errno;
         if (status != ENOTCONN) { // peer closed the connection
             assert(status);
@@ -331,7 +368,7 @@ bool tcpshutdown_blocked(Context *ctx, Task *task)
 }
 
 
-void tcpread_init(Context *ctx, Read *req, void *stream,
+void sockread_init(Context *ctx, Read *req, void *stream,
                   void *buffer, int length)
 {
     assert(length >= 0);
@@ -341,20 +378,20 @@ void tcpread_init(Context *ctx, Read *req, void *stream,
     if (ctx->error)
         return;
 
-    Tcp *tcp = container_of(req->stream, Tcp, stream);
+    Socket *sock = container_of(req->stream, Socket, stream);
 
-    if (tcp->_ssl) {
+    if (sock->_ssl) {
         log_debug(ctx, "reading encrypted");
-        req->task._blocked = tcpreadtls_blocked;
+        req->task._blocked = sockreadtls_blocked;
     } else {
         log_debug(ctx, "reading unencrypted");
-        req->task._blocked = tcpread_blocked;
+        req->task._blocked = sockread_blocked;
     }
-    tcpread_reset(ctx, req, buffer, length);
+    sockread_reset(ctx, req, buffer, length);
 }
 
 
-void tcpread_reset(Context *ctx, Read *req, void *buffer, int length)
+void sockread_reset(Context *ctx, Read *req, void *buffer, int length)
 {
     assert(length >= 0);
 
@@ -367,14 +404,14 @@ void tcpread_reset(Context *ctx, Read *req, void *buffer, int length)
 }
 
 
-void tcpread_deinit(Context *ctx, Read *req)
+void sockread_deinit(Context *ctx, Read *req)
 {
     (void)ctx;
     (void)req;
 }
 
 
-void tcpwrite_init(Context *ctx, Write *req, void *stream,
+void sockwrite_init(Context *ctx, Write *req, void *stream,
                    void *buffer, int length)
 {
     memset(req, 0, sizeof(*req));
@@ -382,20 +419,20 @@ void tcpwrite_init(Context *ctx, Write *req, void *stream,
     if (ctx->error)
         return;
 
-    Tcp *tcp = container_of(req->stream, Tcp, stream);
+    Socket *sock = container_of(req->stream, Socket, stream);
     
-    if (tcp->_ssl) {
+    if (sock->_ssl) {
         log_debug(ctx, "writing encrypted");
-        req->task._blocked = tcpwritetls_blocked;
+        req->task._blocked = sockwritetls_blocked;
     } else {
         log_debug(ctx, "writing unencrypted");
-        req->task._blocked = tcpwrite_blocked;
+        req->task._blocked = sockwrite_blocked;
     }
-    tcpwrite_reset(ctx, req, buffer, length);
+    sockwrite_reset(ctx, req, buffer, length);
 }
 
 
-void tcpwrite_reset(Context *ctx, Write *req, void *buffer, int length)
+void sockwrite_reset(Context *ctx, Write *req, void *buffer, int length)
 {
     assert(length >= 0);
 
@@ -408,32 +445,32 @@ void tcpwrite_reset(Context *ctx, Write *req, void *buffer, int length)
 }
 
 
-void tcpwrite_deinit(Context *ctx, Write *req)
+void sockwrite_deinit(Context *ctx, Write *req)
 {
     (void)ctx;
     (void)req;
 }
 
 
-bool tcpread_blocked(Context *ctx, Task *task)
+bool sockread_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
 
     Read *req = (Read *)task;
-    Tcp *tcp = container_of(req->stream, Tcp, stream);
+    Socket *sock = container_of(req->stream, Socket, stream);
 
     if (req->length == 0) {
         return false;
     }
 
-    int nrecv = (int)recv(tcp->fd, req->buffer, (size_t)req->length, 0);
+    int nrecv = (int)recv(sock->fd, req->buffer, (size_t)req->length, 0);
 
     if (nrecv < 0) {
         int status = errno;
         if (status == EAGAIN || status == EWOULDBLOCK || status == EINTR) {
             req->task.block.type = BLOCK_IO;
-            req->task.block.job.io.fd = tcp->fd;
+            req->task.block.job.io.fd = sock->fd;
             req->task.block.job.io.flags = IO_READ;
             return true;
         } else {
@@ -454,14 +491,14 @@ bool tcpread_blocked(Context *ctx, Task *task)
 }
 
 
-bool tcpreadtls_blocked(Context *ctx, Task *task)
+bool sockreadtls_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
 
     Read *req = (Read *)task;
-    Tcp *tcp = container_of(req->stream, Tcp, stream);
-    SSL *ssl = tcp->_ssl;
+    Socket *sock = container_of(req->stream, Socket, stream);
+    SSL *ssl = sock->_ssl;
 
     if (req->length == 0) {
         return false;
@@ -475,14 +512,14 @@ bool tcpreadtls_blocked(Context *ctx, Task *task)
         case SSL_ERROR_WANT_READ:
             log_debug(ctx, "TLS-encrypted read requires read");
             req->task.block.type = BLOCK_IO;
-            req->task.block.job.io.fd = tcp->fd;
+            req->task.block.job.io.fd = sock->fd;
             req->task.block.job.io.flags = IO_READ;
             return true;
 
         case SSL_ERROR_WANT_WRITE:
             log_debug(ctx, "TLS-encrypted read requires write");
             req->task.block.type = BLOCK_IO;
-            req->task.block.job.io.fd = tcp->fd;
+            req->task.block.job.io.fd = sock->fd;
             req->task.block.job.io.flags = IO_WRITE;
             return true;
 
@@ -502,13 +539,13 @@ bool tcpreadtls_blocked(Context *ctx, Task *task)
 }
 
 
-bool tcpwrite_blocked(Context *ctx, Task *task)
+bool sockwrite_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
 
     Write *req = (Write *)task;
-    Tcp *tcp = container_of(req->stream, Tcp, stream);
+    Socket *sock = container_of(req->stream, Socket, stream);
     
     const void *buffer = (const char *)req->buffer + req->nwrite;
     int length = req->length - req->nwrite;
@@ -517,13 +554,13 @@ bool tcpwrite_blocked(Context *ctx, Task *task)
         return false;
     }
 
-    int nsend = (int)send(tcp->fd, buffer, (size_t)length, 0);
+    int nsend = (int)send(sock->fd, buffer, (size_t)length, 0);
 
     if (nsend < 0) {
         int status = errno;
         if (status == EAGAIN || status == EWOULDBLOCK || status == EINTR) {
             req->task.block.type = BLOCK_IO;
-            req->task.block.job.io.fd = tcp->fd;
+            req->task.block.job.io.fd = sock->fd;
             req->task.block.job.io.flags = IO_WRITE;
             return true;
         } else {
@@ -544,14 +581,14 @@ bool tcpwrite_blocked(Context *ctx, Task *task)
 }
 
 
-bool tcpwritetls_blocked(Context *ctx, Task *task)
+bool sockwritetls_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
 
     Write *req = (Write *)task;
-    Tcp *tcp = container_of(req->stream, Tcp, stream);
-    SSL *ssl = tcp->_ssl;
+    Socket *sock = container_of(req->stream, Socket, stream);
+    SSL *ssl = sock->_ssl;
     
     const void *buffer = (const char *)req->buffer + req->nwrite;
     int length = req->length - req->nwrite;
@@ -568,14 +605,14 @@ bool tcpwritetls_blocked(Context *ctx, Task *task)
         case SSL_ERROR_WANT_READ:
             log_debug(ctx, "TLS-encrypted write requires read");
             req->task.block.type = BLOCK_IO;
-            req->task.block.job.io.fd = tcp->fd;
+            req->task.block.job.io.fd = sock->fd;
             req->task.block.job.io.flags = IO_READ;
             return true;
 
         case SSL_ERROR_WANT_WRITE:
             log_debug(ctx, "TLS-encrypted write requires write");
             req->task.block.type = BLOCK_IO;
-            req->task.block.job.io.fd = tcp->fd;
+            req->task.block.job.io.fd = sock->fd;
             req->task.block.job.io.flags = IO_WRITE;
             return true;
 
@@ -598,39 +635,39 @@ bool tcpwritetls_blocked(Context *ctx, Task *task)
 }
 
 
-void tcpstarttls_init(Context *ctx, TcpStartTls *req, Tcp *tcp,
+void sockstarttls_init(Context *ctx, SockStartTls *req, Socket *sock,
                       TlsContext *tls, TlsMethod method)
 {
     memory_clear(ctx, req, sizeof(*req));
-    req->task._blocked = tcpstarttls_blocked;
-    req->tcp = tcp;
+    req->task._blocked = sockstarttls_blocked;
+    req->sock = sock;
     req->tls = tls;
     req->method = method;
 }
 
 
-void tcpstarttls_deinit(Context *ctx, TcpStartTls *req)
+void sockstarttls_deinit(Context *ctx, SockStartTls *req)
 {
     (void)ctx;
     (void)req;
 }
 
 
-bool tcpstarttls_blocked(Context *ctx, Task *task)
+bool sockstarttls_blocked(Context *ctx, Task *task)
 {
     if (ctx->error)
         return false;
 
-    TcpStartTls *req = (TcpStartTls *)task;
-    Tcp *tcp = req->tcp;
-    SSL *ssl = tcp->_ssl;
+    SockStartTls *req = (SockStartTls *)task;
+    Socket *sock = req->sock;
+    SSL *ssl = sock->_ssl;
 
     if (!ssl) {
         log_debug(ctx, "creating new SSL");
         ssl = SSL_new(req->tls->_ssl_ctx); // TODO: error check
-        tcp->_ssl = ssl;
+        sock->_ssl = ssl;
 
-        SSL_set_fd(ssl, tcp->fd); // TODO: error check
+        SSL_set_fd(ssl, sock->fd); // TODO: error check
 
         switch (req->method) {
         case TLSMETHOD_SERVER:
@@ -655,21 +692,21 @@ bool tcpstarttls_blocked(Context *ctx, Task *task)
     switch (status) {
     case SSL_ERROR_NONE:
         log_debug(ctx, "TLS handshake completed");
-        tcp->tls = req->tls;
+        sock->tls = req->tls;
         req->task.block.type = BLOCK_NONE;
         return false;
 
     case SSL_ERROR_WANT_READ:
         log_debug(ctx, "TLS handshake requires read");
         req->task.block.type = BLOCK_IO;
-        req->task.block.job.io.fd = tcp->fd;
+        req->task.block.job.io.fd = sock->fd;
         req->task.block.job.io.flags = IO_READ;
         return true;
 
     case SSL_ERROR_WANT_WRITE:
         log_debug(ctx, "TLS handshake requires write");
         req->task.block.type = BLOCK_IO;
-        req->task.block.job.io.fd = tcp->fd;
+        req->task.block.job.io.fd = sock->fd;
         req->task.block.job.io.flags = IO_WRITE;
         return true;
 

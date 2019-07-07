@@ -463,16 +463,25 @@ typedef enum {
 } TlsFileType;
 
 typedef enum {
+    TLSPROTO_NONE = 0,
+    TLSPROTO_DTLS,
+    TLSPROTO_TLS
+} TlsProto;
+
+typedef enum {
     TLSMETHOD_NONE = 0,
     TLSMETHOD_SERVER,
     TLSMETHOD_CLIENT
 } TlsMethod;
 
 typedef struct {
+    TlsProto proto;
+    TlsMethod method;
     void *_ssl_ctx;
 } TlsContext;
 
-void tlscontext_init(Context *ctx, TlsContext *tls, TlsMethod method);
+void tlscontext_init(Context *ctx, TlsContext *tls, TlsProto proto,
+                     TlsMethod method);
 void tlscontext_deinit(Context *ctx, TlsContext *tls);
 void tlscontext_certificate_file(Context *ctx, TlsContext *tls,
                                  const char *file, TlsFileType type);
@@ -482,63 +491,65 @@ void tlscontext_privatekey_file(Context *ctx, TlsContext *tls,
 /**@}*/
 
 /**
- * \defgroup tcp TCP Streams
- */
+ * \defgroup sockets
+ */ 
+
+typedef enum {
+    SOCKET_NONE = 0,
+    SOCKET_TCP,
+    SOCKET_UDP
+} SocketType;
 
 typedef struct {
     Stream stream;
+    SocketType type;
     int fd;
     TlsContext *tls;
     void *_ssl;
-} Tcp;
+} Socket;
 
-void tcp_init(Context *ctx, Tcp *tcp, int domain);
-void tcp_deinit(Context *ctx, Tcp *sock);
-
+void socket_init(Context *ctx, Socket *sock, SocketType type, int family);
+void socket_deinit(Context *ctx, Socket *sock);
 
 typedef struct {
     Task task;
-    Tcp *tcp;
+    Socket *sock;
     const struct sockaddr *address;
     int address_len;
     bool started;
-} TcpConnect;
+} SockConnect;
 
-void tcpconnect_init(Context *ctx, TcpConnect *req, Tcp *tcp,
-                     const struct sockaddr *address, int address_len);
-void tcpconnect_deinit(Context *ctx, TcpConnect *conn);
-
-
-typedef struct {
-    Task task;
-    Tcp *tcp;
-    int how;
-} TcpShutdown;
-
-void tcpshutdown_init(Context *ctx, TcpShutdown *req, Tcp *tcp,
-                      int how);
-void tcpshutdown_deinit(Context *ctx, TcpShutdown *req);
+void sockconnect_init(Context *ctx, SockConnect *req, Socket *sock,
+                      const struct sockaddr *address, int address_len);
+void sockconnect_deinit(Context *ctx, SockConnect *conn);
 
 
 typedef struct {
     Task task;
-    Tcp *tcp;
+    Socket *sock;
+} SockShutdown;
+
+void sockshutdown_init(Context *ctx, SockShutdown *req, Socket *sock);
+void sockshutdown_deinit(Context *ctx, SockShutdown *req);
+
+typedef struct {
+    Task task;
+    Socket *sock;
     TlsContext *tls;
     TlsMethod method;
-} TcpStartTls;
+} SockStartTls;
 
-void tcpstarttls_init(Context *ctx, TcpStartTls *req, Tcp *tcp,
-                      TlsContext *tls, TlsMethod method);
-void tcpstarttls_deinit(Context *ctx, TcpStartTls *req);
-
+void sockstarttls_init(Context *ctx, SockStartTls *req, Socket *sock,
+                       TlsContext *tls, TlsMethod method);
+void sockstarttls_deinit(Context *ctx, SockStartTls *req);
 
 typedef struct {
     Task task;
-    Tcp *tcp;
-} TcpStopTls;
+    Socket *sock;
+} SockStopTls;
 
-void tcpstoptls_init(Context *ctx, TcpStopTls *req, Tcp *tcp);
-void tcpstoptls_deinit(Context *ctx, TcpStopTls *req);
+void sockstoptls_init(Context *ctx, SockStopTls *req, Socket *sock);
+void sockstoptls_deinit(Context *ctx, SockStopTls *req);
 
 /**@}*/
 

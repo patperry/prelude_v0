@@ -6,7 +6,7 @@ RANLIB = ranlib
 LIBS += -lm `pkg-config --libs openssl`
 CFLAGS += -Wall -Wextra -pedantic -Werror -g `pkg-config --cflags openssl`
 CPPFLAGS += -Isrc
-LDFLAGS += -g `pkg-config --ldflags openssl`
+LDFLAGS += -g
 
 LIBRARY_A = src/library.a
 LIBRARY_O = src/array.o src/async.o src/char.o src/context.o src/dns.o \

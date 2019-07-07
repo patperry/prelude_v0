@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200112L
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -477,7 +478,7 @@ static bool httpget_meta_blocked(Context *ctx, HttpGet *req)
     uint8_t *line_end;
     bool empty_line = false;
 
-    while ((line_end = memmem(req->data, req->data_len, "\r\n", 2))) {
+    while ((line_end = memory_find(ctx, req->data, req->data_len, "\r\n", 2))) {
         *line_end = '\0';
         uint8_t *line = req->data;
         size_t line_len = line_end - line;
@@ -733,25 +734,32 @@ void httpget_deinit(Context *ctx, HttpGet *req)
     switch (req->state) {
     case HTTPGET_FINISH:
         httpbody_deinit(ctx, &req->current);
+        /* fall through */
 
     case HTTPGET_META:
         read_deinit(ctx, &req->read);
+        /* fall through */
 
     case HTTPGET_SEND:
         write_deinit(ctx, &req->write);
+        /* fall through */
 
     case HTTPGET_STARTTLS:
         tcpstarttls_deinit(ctx, &req->starttls);
+        /* fall through */
 
     case HTTPGET_CONNECT:
         tcpconnect_deinit(ctx, &req->conn);
+        /* fall through */
 
     case HTTPGET_OPEN:
         if (req->has_tcp)
             tcp_deinit(ctx, &req->tcp);
+        /* fall through */
 
     case HTTPGET_GETADDR:
         getaddrinfo_deinit(ctx, &req->getaddr);
+        /* fall through */
 
     case HTTPGET_START:
         break;

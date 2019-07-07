@@ -1,3 +1,4 @@
+#define _GNU_SOURCE // memmem
 #include <string.h>
 #include "prelude.h"
 
@@ -49,4 +50,12 @@ void memory_copy(Context *ctx, void *buf, const void *src, size_t size)
 {
     (void)ctx;
     memcpy(buf, src, size);
+}
+
+
+void *memory_find(Context *ctx, const void *buf, size_t buf_len,
+                  const void *search, size_t search_len)
+{
+    (void)ctx;
+    return memmem(buf, buf_len, search, search_len);
 }

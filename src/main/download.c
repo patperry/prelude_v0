@@ -343,13 +343,13 @@ static bool httpget_open_blocked(Context *ctx, HttpGet *req)
         int family;
         switch (ai->ai_family) {
         case PF_INET:
-            family = IPADDR_V4;
+            family = IP_V4;
             break;
         case PF_INET6:
-            family = IPADDR_V6;
+            family = IP_V6;
             break;
         default:
-            family = IPADDR_NONE;
+            family = IP_NONE;
             break;
         }
 

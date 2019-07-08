@@ -452,28 +452,65 @@ void tlscontext_privatekey_file(Context *ctx, TlsContext *tls,
  */
 
 typedef enum {
-    IPADDR_NONE = 0,
-    IPADDR_V4,
-    IPADDR_V6
-} IpAddrType;
-
-typedef enum {
     SOCKET_NONE = 0,
     SOCKET_TCP,
     SOCKET_UDP
 } SocketType;
 
+typedef enum {
+    IP_NONE = 0,
+    IP_V4,
+    IP_V6
+} IpType;
+
+typedef struct {
+    uint8_t segments[4];
+} IpAddrV4;
+
+typedef struct {
+    uint16_t segments[8];
+} IpAddrV6;
+
+typedef struct {
+    IpType type;
+    union {
+        IpAddrV4 v4;
+        IpAddrV6 v6;
+    } addr;
+} IpAddr;
+
+typedef struct {
+    IpAddrV4 ip;
+    uint16_t port;
+} SocketAddrV4;
+
+typedef struct {
+    IpAddrV6 ip;
+    uint16_t port;
+    uint32_t flowinfo;
+    uint32_t scope_id;
+} SocketAddrV6;
+
+typedef struct {
+    IpType type;
+    union {
+        SocketAddrV4 v4;
+        SocketAddrV6 v6;
+    } addr;
+} SocketAddr;
+
 typedef struct {
     SocketType type;
-    IpAddrType family;
+    IpType family;
     int fd;
     TlsContext *tls;
     void *_ssl;
 } Socket;
 
-void socket_init(Context *ctx, Socket *sock, SocketType type,
-                 IpAddrType family);
+void socket_init(Context *ctx, Socket *sock, SocketType type, IpType family);
 void socket_deinit(Context *ctx, Socket *sock);
+
+//void socket_bind(Context *ctx, Socket *sock, SockAddr *addr);
 
 typedef struct {
     Task task;

@@ -161,7 +161,7 @@ void tlscontext_privatekey_file(Context *ctx, TlsContext *tls,
 
 
 void socket_init(Context *ctx, Socket *sock, SocketType type,
-                 IpAddrType family)
+                 IpType family)
 {
     memory_clear(ctx, sock, sizeof(*sock));
     sock->fd = -1;
@@ -179,11 +179,11 @@ void socket_init(Context *ctx, Socket *sock, SocketType type,
     int protocol;
 
     switch (family) {
-    case IPADDR_V4:
+    case IP_V4:
         socket_family = PF_INET;
         break;
 
-    case IPADDR_V6:
+    case IP_V6:
         socket_family = PF_INET6;
         break;
 

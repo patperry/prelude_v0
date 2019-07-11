@@ -233,14 +233,13 @@ void socket_deinit(Context *ctx, Socket *sock)
 
 
 void sockconnect_init(Context *ctx, SockConnect *req, Socket *sock,
-                     const struct sockaddr *address, int address_len)
+                      const SocketAddr *addr)
 {
-    assert(address_len >= 0);
+    assert(addr->type == sock->family);
     memory_clear(ctx, req, sizeof(*req));
     req->task._blocked = sockconnect_blocked;
     req->sock = sock;
-    req->address = address;
-    req->address_len = address_len;
+    req->addr = addr;
     req->started = false;
 }
 
@@ -251,6 +250,43 @@ void sockconnect_deinit(Context *ctx, SockConnect *req)
     (void)req;
 }
 
+static void socketaddrv4_encode(const SocketAddrV4 *addr,
+                                struct sockaddr_in *dst)
+{
+    dst->sin_family = AF_INET;
+    dst->sin_port = htons(addr->port);
+    memcpy(&dst->sin_addr.s_addr, addr->ip.bytes, sizeof(addr->ip.bytes));
+}
+
+static void socketaddrv6_encode(const SocketAddrV6 *addr,
+                                struct sockaddr_in6 *dst)
+{
+    dst->sin6_family = AF_INET6;
+    dst->sin6_port = htons(addr->port);
+    dst->sin6_flowinfo = addr->flowinfo;
+    dst->sin6_scope_id = addr->scope_id;
+    memcpy(&dst->sin6_addr.s6_addr, addr->ip.bytes, sizeof(addr->ip.bytes));
+}
+
+static void socketaddr_encode(const SocketAddr *addr,
+                              struct sockaddr_storage *dst,
+                              socklen_t *address_len)
+{
+    switch (addr->type) {
+    case IP_V4:
+        socketaddrv4_encode(&addr->value.v4, (struct sockaddr_in *)dst);
+        *address_len = sizeof(struct sockaddr_in);
+        break;
+
+    case IP_V6:
+        socketaddrv6_encode(&addr->value.v6, (struct sockaddr_in6 *)dst);
+        *address_len = sizeof(struct sockaddr_in6);
+        break;
+
+    default:
+        break;
+    }
+}
 
 bool sockconnect_blocked(Context *ctx, Task *task)
 {
@@ -258,9 +294,12 @@ bool sockconnect_blocked(Context *ctx, Task *task)
         return false;
 
     SockConnect *req = (SockConnect *)task;
+    struct sockaddr_storage addr;
+    socklen_t addr_len;
 
-    if (connect(req->sock->fd, req->address,
-                (socklen_t)req->address_len) < 0) {
+    socketaddr_encode(req->addr, &addr, &addr_len);
+
+    if (connect(req->sock->fd, (struct sockaddr *)&addr, addr_len) < 0) {
         int status = errno;
 
         if (!req->started) {

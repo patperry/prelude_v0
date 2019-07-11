@@ -92,7 +92,6 @@ typedef struct {
 
     struct addrinfo hints;
     GetAddrInfo getaddr;
-    const struct addrinfo *addrinfo;
     Socket sock;
     bool has_sock;
     SockConnect conn;
@@ -296,11 +295,8 @@ static bool httpget_start(Context *ctx, HttpGet *req)
     if (ctx->error)
         return false;
 
-    memset(&req->hints, 0, sizeof(req->hints));
-    req->hints.ai_flags = PF_UNSPEC;
-    req->hints.ai_socktype = SOCK_STREAM;
-    req->hints.ai_protocol = IPPROTO_TCP;
-    getaddrinfo_init(ctx, &req->getaddr, req->host, "https", &req->hints);
+    getaddrinfo_init(ctx, &req->getaddr, req->host, "https",
+                     SOCKET_TCP, IP_NONE, 0);
 
     log_debug(ctx, "getaddr started");
     req->state = HTTPGET_GETADDR;
@@ -318,8 +314,6 @@ static bool httpget_getaddr_blocked(Context *ctx, HttpGet *req)
         return true;
     }
 
-    req->addrinfo = req->getaddr.result;
-
     log_debug(ctx, "getaddr finished");
     log_debug(ctx, "open started");
     req->state = HTTPGET_OPEN;
@@ -332,46 +326,26 @@ static bool httpget_open_blocked(Context *ctx, HttpGet *req)
     if (ctx->error)
         return false;
 
-    assert(req->addrinfo);
     req->has_sock = false;
+    const AddrInfo *ai = NULL;
 
-    while (!req->has_sock  && req->addrinfo) {
-        const struct addrinfo *ai = req->addrinfo;
-        assert(ai->ai_socktype == SOCK_STREAM);
-        assert(ai->ai_protocol == IPPROTO_TCP);
-
-        int family;
-        switch (ai->ai_family) {
-        case PF_INET:
-            family = IP_V4;
-            break;
-        case PF_INET6:
-            family = IP_V6;
-            break;
-        default:
-            family = IP_NONE;
-            break;
-        }
-
-        if (family) {
-            socket_init(ctx, &req->sock, SOCKET_TCP, family);
-            if (ctx->error) {
-                socket_deinit(ctx, &req->sock);
-                req->addrinfo = req->addrinfo->ai_next;
-            } else {
-                req->has_sock = true;
-            }
+    while (!req->has_sock  && addrinfoiter_advance(ctx, &req->getaddr.result)) {
+        ai = &req->getaddr.result.current;
+        socket_init(ctx, &req->sock, ai->type, ai->addr.type);
+        if (ctx->error) {
+            socket_deinit(ctx, &req->sock);
         } else {
-            req->addrinfo = req->addrinfo->ai_next;
+            req->has_sock = true;
         }
     }
 
     if (!req->has_sock) {
+        context_panic(ctx, ctx->error, "failed connecting to host: %s",
+                      ctx->message);
         return false;
     }
 
-    sockconnect_init(ctx, &req->conn, &req->sock, req->addrinfo->ai_addr,
-                    req->addrinfo->ai_addrlen);
+    sockconnect_init(ctx, &req->conn, &req->sock, &ai->addr);
 
     log_debug(ctx, "open finished");
     log_debug(ctx, "connect started");
@@ -391,19 +365,11 @@ static bool httpget_connect_blocked(Context *ctx, HttpGet *req)
     }
 
     if (ctx->error) {
-        req->addrinfo = req->addrinfo->ai_next;
-
-        if (req->addrinfo) {
-            context_recover(ctx);
-            sockconnect_deinit(ctx, &req->conn);
-            socket_deinit(ctx, &req->sock);
-            req->has_sock = false;
-            req->state = HTTPGET_OPEN;
-        } else {
-            context_panic(ctx, ctx->error, "failed connecting to host: %s",
-                          ctx->message);
-        }
-
+        context_recover(ctx);
+        sockconnect_deinit(ctx, &req->conn);
+        socket_deinit(ctx, &req->sock);
+        req->has_sock = false;
+        req->state = HTTPGET_OPEN;
         return false;
     }
 

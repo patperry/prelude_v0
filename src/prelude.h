@@ -464,11 +464,11 @@ typedef enum {
 } IpType;
 
 typedef struct {
-    uint8_t segments[4];
+    uint8_t bytes[4];
 } IpAddrV4;
 
 typedef struct {
-    uint16_t segments[8];
+    uint8_t bytes[16];
 } IpAddrV6;
 
 typedef struct {
@@ -476,7 +476,7 @@ typedef struct {
     union {
         IpAddrV4 v4;
         IpAddrV6 v6;
-    } addr;
+    } value;
 } IpAddr;
 
 typedef struct {
@@ -496,7 +496,7 @@ typedef struct {
     union {
         SocketAddrV4 v4;
         SocketAddrV6 v6;
-    } addr;
+    } value;
 } SocketAddr;
 
 typedef struct {
@@ -515,13 +515,12 @@ void socket_deinit(Context *ctx, Socket *sock);
 typedef struct {
     Task task;
     Socket *sock;
-    const struct sockaddr *address;
-    int address_len;
+    const SocketAddr *addr;
     bool started;
 } SockConnect;
 
 void sockconnect_init(Context *ctx, SockConnect *req, Socket *sock,
-                      const struct sockaddr *address, int address_len);
+                      const SocketAddr *addr);
 void sockconnect_deinit(Context *ctx, SockConnect *conn);
 
 typedef struct {
@@ -584,18 +583,33 @@ void socksend_deinit(Context *ctx, SockSend *req);
  * \defgroup dns DNS utilities
  */
 
-struct addrinfo;
+typedef struct {
+    SocketType type;
+    SocketAddr addr;
+    const char *canonname;
+} AddrInfo;
+
+typedef struct {
+    AddrInfo current;
+    const void *_ai_next;
+} AddrInfoIter;
+
+bool addrinfoiter_advance(Context *ctx, AddrInfoIter *it);
 
 typedef struct {
     Task task;
+    AddrInfoIter result;
     const char *node;
     const char *service;
-    const struct addrinfo *hints;
-    struct addrinfo *result;
+    SocketType type;
+    IpType family;
+    int flags;
+    void *_ai;
 } GetAddrInfo;
 
 void getaddrinfo_init(Context *ctx, GetAddrInfo *req, const char *node,
-                      const char *service, const struct addrinfo *hints);
+                      const char *service, SocketType type, IpType family,
+                      int flags);
 void getaddrinfo_deinit(Context *ctx, GetAddrInfo *req);
 
 /**@}*/

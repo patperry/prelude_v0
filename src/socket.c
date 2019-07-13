@@ -253,6 +253,18 @@ void socket_bind(Context *ctx, Socket *sock, SocketAddr *addr)
 }
 
 
+void socket_listen(Context *ctx, Socket *sock, int backlog)
+{
+    if (ctx->error)
+        return;
+
+    int ret = listen(sock->fd, backlog);
+    if (ret) {
+        context_panic(ctx, ERROR_OS, "failed listening on socket");
+    }
+}
+
+
 void sockconnect_init(Context *ctx, SockConnect *req, Socket *sock,
                       const SocketAddr *addr)
 {

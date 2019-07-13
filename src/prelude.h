@@ -510,7 +510,9 @@ typedef struct {
 void socket_init(Context *ctx, Socket *sock, SocketType type, IpType family);
 void socket_deinit(Context *ctx, Socket *sock);
 
+/* TODO: setsockopt SO_REUSEADDR */
 void socket_bind(Context *ctx, Socket *sock, SocketAddr *addr);
+void socket_listen(Context *ctx, Socket *sock, int backlog);
 
 
 typedef struct {

@@ -16,6 +16,10 @@ static int ssl_filetype(TlsFileType type);
 static void context_ssl_panic(Context *ctx, const char *format, ...)
     __attribute__ ((format (printf, 2, 3)));
 
+static void socketaddr_encode(const SocketAddr *addr,
+                              struct sockaddr_storage *dst,
+                              socklen_t *address_len);
+
 static bool sockconnect_blocked(Context *ctx, Task *task);
 static bool sockshutdown_blocked(Context *ctx, Task *task);
 static bool sockrecv_blocked(Context *ctx, Task *task);
@@ -229,6 +233,23 @@ void socket_deinit(Context *ctx, Socket *sock)
 
     if (sock->fd >= 0)
         close(sock->fd);
+}
+
+
+void socket_bind(Context *ctx, Socket *sock, SocketAddr *addr)
+{
+    if (ctx->error)
+        return;
+
+    struct sockaddr_storage sa;
+    socklen_t sa_len;
+    socketaddr_encode(addr, &sa, &sa_len);
+
+    int ret = bind(sock->fd, (const struct sockaddr *)&sa, sa_len);
+
+    if (ret) {
+        context_panic(ctx, ERROR_OS, "failed binding socket to address");
+    }
 }
 
 

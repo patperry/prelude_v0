@@ -510,7 +510,8 @@ typedef struct {
 void socket_init(Context *ctx, Socket *sock, SocketType type, IpType family);
 void socket_deinit(Context *ctx, Socket *sock);
 
-//void socket_bind(Context *ctx, Socket *sock, SockAddr *addr);
+void socket_bind(Context *ctx, Socket *sock, SocketAddr *addr);
+
 
 typedef struct {
     Task task;

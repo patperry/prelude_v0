@@ -21,6 +21,7 @@ static void socketaddr_encode(const SocketAddr *addr,
                               socklen_t *address_len);
 
 static bool sockconnect_blocked(Context *ctx, Task *task);
+static bool sockaccept_blocked(Context *ctx, Task *task);
 static bool sockshutdown_blocked(Context *ctx, Task *task);
 static bool sockrecv_blocked(Context *ctx, Task *task);
 static bool sockrecvtls_blocked(Context *ctx, Task *task);
@@ -357,6 +358,56 @@ bool sockconnect_blocked(Context *ctx, Task *task)
 
 exit:
     req->task.block.type = BLOCK_NONE;
+    return false;
+}
+
+
+void sockaccept_init(Context *ctx, SockAccept *req, Socket *sock)
+{
+    memory_clear(ctx, req, sizeof(*req));
+    req->task._blocked = sockaccept_blocked;
+    req->sock = sock;
+    req->peer_sock.fd = -1;
+}
+
+
+void sockaccept_deinit(Context *ctx, SockAccept *req)
+{
+    socket_deinit(ctx, &req->peer_sock);
+}
+
+
+bool sockaccept_blocked(Context *ctx, Task *task)
+{
+    if (ctx->error)
+        return false;
+
+    SockAccept *req = (SockAccept *)task;
+    Socket *sock = req->sock;
+    struct sockaddr_storage sa;
+    socklen_t sa_len;
+
+    int fd = accept(sock->fd, (struct sockaddr *)&sa, &sa_len);
+    if (fd < 0) {
+        int status = errno;
+        if (status != EWOULDBLOCK) {
+            assert(status);
+            context_code(ctx, status);
+            context_panic(ctx, ctx->error,
+                          "failed accepting connection: %s",
+                          ctx->message);
+            return false;
+        } else {
+            req->task.block.type = BLOCK_IO;
+            req->task.block.job.io.fd = sock->fd;
+            req->task.block.job.io.flags = IO_READ;
+            return true;
+        }
+    }
+
+    req->peer_sock.type = sock->type;
+    req->peer_sock.family = sock->family;
+    req->peer_sock.fd = fd;
     return false;
 }
 

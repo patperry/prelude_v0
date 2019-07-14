@@ -467,9 +467,29 @@ typedef struct {
     uint8_t bytes[4];
 } IpAddrV4;
 
+#define IPADDRV4_ANY_INIT \
+    (IpAddrV4) { \
+        { 0x00, 0x00, 0x00, 0x00 } \
+    }
+
+#define IPADDRV4_LOOPBACK_INIT \
+    (IpAddrV4) { \
+        { 0x7f, 0x00, 0x00, 0x01 } \
+    }
+
 typedef struct {
     uint8_t bytes[16];
 } IpAddrV6;
+
+#define IPADDRV6_ANY_INIT \
+    (IpAddrV6) { \
+        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } \
+    }
+
+#define IPADDRV6_LOOPBACK_INIT \
+    (IpAddrV6) { \
+        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 } \
+    }
 
 typedef struct {
     IpType type;
@@ -525,6 +545,18 @@ typedef struct {
 void sockconnect_init(Context *ctx, SockConnect *req, Socket *sock,
                       const SocketAddr *addr);
 void sockconnect_deinit(Context *ctx, SockConnect *conn);
+
+
+typedef struct {
+    Task task;
+    Socket *sock;
+    Socket peer_sock;
+    SocketAddr peer_address;
+} SockAccept;
+
+void sockaccept_init(Context *ctx, SockAccept *req, Socket *sock);
+void sockaccept_deinit(Context *ctx, SockAccept *req);
+
 
 typedef struct {
     Task task;

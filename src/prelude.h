@@ -649,4 +649,47 @@ void getaddrinfo_deinit(Context *ctx, GetAddrInfo *req);
 
 /**@}*/
 
+#define HTTP_HEADER_BYTES_MAX (1 << 20)
+
+typedef struct {
+    const char *key;
+    const char *value;
+} HttpHeader;
+
+typedef struct {
+    Task task;
+    uint8_t *data;
+    int data_len;
+} HttpContent;
+
+typedef struct {
+    Task task;
+    SockRecv recv;
+
+    const char *status;
+    int status_len;
+
+    HttpHeader *headers;
+    int header_count;
+    int header_capacity;
+
+    size_t content_length;
+    size_t content_read;
+    bool content_started;
+
+    HttpContent current;
+
+    void *buffer;
+    uint8_t *data;
+
+    size_t buffer_len;
+    size_t data_len;
+    size_t data_max;
+} HttpRecv;
+
+void httprecv_init(Context *ctx, HttpRecv *req, Socket *sock);
+/* void httprecv_reset(Context *ctx, HttpRecv *req, Socket *sock); */
+void httprecv_deinit(Context *ctx, HttpRecv *req);
+bool httprecv_advance(Context *ctx, HttpRecv *req);
+
 #endif /* PRELUDE_H */

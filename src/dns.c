@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200112L
+#include <assert.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -74,12 +75,8 @@ bool getaddrinfo_blocked(Context *ctx, Task *task)
         context_panic(ctx, ERROR_OS, "failed getting address information: %s",
                       gai_strerror(status));
     }
-
+    assert(ai);
     req->result._ai_next = ai;
-    if (!addrinfoiter_advance(ctx, &req->result)) {
-        context_panic(ctx, ERROR_OS, "failed getting address information");
-    }
-
     return false;
 }
 
@@ -130,8 +127,10 @@ bool addrinfoiter_advance(Context *ctx, AddrInfoIter *it)
     it->_ai_next = ai->ai_next;
 
     if (invalid) {
+        log_debug(ctx, "address is invalid");
         return addrinfoiter_advance(ctx, it);
     } else {
+        log_debug(ctx, "got an address!");
         return true;
     }
 }

@@ -610,6 +610,8 @@ bool sockrecv_blocked(Context *ctx, Task *task)
 
 bool sockrecvtls_blocked(Context *ctx, Task *task)
 {
+    log_debug(ctx, "waiting on recvtls");
+
     if (ctx->error)
         return false;
 
@@ -627,7 +629,8 @@ bool sockrecvtls_blocked(Context *ctx, Task *task)
         int status = SSL_get_error(ssl, nrecv);
         switch (status) {
         case SSL_ERROR_WANT_READ:
-            log_debug(ctx, "TLS-encrypted read requires read");
+            log_debug(ctx, "TLS-encrypted read requires read on fd %d",
+                      sock->fd);
             req->task.block.type = BLOCK_IO;
             req->task.block.job.io.fd = sock->fd;
             req->task.block.job.io.flags = IO_READ;

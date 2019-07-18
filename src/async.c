@@ -57,6 +57,12 @@ void await_io(Context *ctx, BlockIO *block)
     if (ctx->error)
         return;
 
+    log_debug(ctx, "awaiting %s on fd %d",
+              block->flags == IO_READ ? "read"
+              : block->flags == IO_WRITE ? "write"
+              : block->flags == (IO_READ | IO_WRITE) ? "read or write"
+              : "nothing", block->fd);
+
     struct pollfd fds[1];
     fds[0].fd = block->fd;
     fds[0].events = 0;

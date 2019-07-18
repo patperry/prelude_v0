@@ -65,7 +65,7 @@ typedef enum {
     HTTPGET_CONNECT,
     HTTPGET_STARTTLS,
     HTTPGET_SEND,
-    HTTPGET_META,
+    HTTPGET_RECV,
     HTTPGET_FINISH
 } HttpGetState;
 
@@ -252,15 +252,15 @@ static bool httpget_send_blocked(Context *ctx, HttpGet *req)
     httprecv_init(ctx, &req->recv, &req->sock);
 
     log_debug(ctx, "send finished");
-    log_debug(ctx, "meta started");
-    req->state = HTTPGET_META;
+    log_debug(ctx, "recv started");
+    req->state = HTTPGET_RECV;
     return false;
 }
 
 
-static bool httpget_meta_blocked(Context *ctx, HttpGet *req)
+static bool httpget_recv_blocked(Context *ctx, HttpGet *req)
 {
-    log_debug(ctx, "waiting on meta");
+    log_debug(ctx, "waiting on recv");
 
     if (ctx->error)
         return false;
@@ -270,7 +270,7 @@ static bool httpget_meta_blocked(Context *ctx, HttpGet *req)
         return true;
     }
 
-    log_debug(ctx, "meta finished");
+    log_debug(ctx, "recv finished");
     req->state = HTTPGET_FINISH;
     return false;
 }
@@ -312,8 +312,8 @@ bool httpget_blocked(Context *ctx, Task *task)
             action = httpget_send_blocked;
             break;
 
-        case HTTPGET_META:
-            action = httpget_meta_blocked;
+        case HTTPGET_RECV:
+            action = httpget_recv_blocked;
             break;
 
         case HTTPGET_FINISH:
@@ -346,7 +346,7 @@ void httpget_deinit(Context *ctx, HttpGet *req)
 {
     switch (req->state) {
     case HTTPGET_FINISH:
-    case HTTPGET_META:
+    case HTTPGET_RECV:
         httprecv_deinit(ctx, &req->recv);
         /* fall through */
 

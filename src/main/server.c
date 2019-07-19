@@ -29,20 +29,34 @@ int main(int argc, const char **argv)
     sockaccept_init(&ctx, &accept, &sock);
     task_await(&ctx, &accept.task);
 
-    SockRecv recv;
-    char buffer[1024];
-    sockrecv_init(&ctx, &recv, &accept.peer_sock, buffer, 1023);
+    HttpRecv recv;
+    httprecv_init(&ctx, &recv, &accept.peer_sock);
     task_await(&ctx, &recv.task);
 
-    buffer[recv.nrecv] = '\0';
-    printf("%s", buffer);
+    log_debug(&ctx, "start: `%s`", recv.start);
+    size_t i, n = recv.header_count;
+    for (i = 0; i < n; i++) {
+        log_debug(&ctx, "header: `%s`: `%s`",
+                  recv.headers[i].key, recv.headers[i].value);
+    }
+
+    log_debug(&ctx, "content-length: %zu", recv.content_length);
+
+    while (httprecv_advance(&ctx, &recv)) {
+        task_await(&ctx, &recv.current.task);
+        log_debug(&ctx, "read %d bytes", (int)recv.current.data_len);
+        printf("----------------------------------------\n");
+        printf("%.*s", (int)recv.current.data_len,
+               (char *)recv.current.data);
+        printf("\n----------------------------------------\n");
+    }
 
     if (ctx.error) {
         fprintf(stderr, "error: %s\n", ctx.message);
         status = EXIT_FAILURE;
     }
 
-    sockrecv_deinit(&ctx, &recv);
+    httprecv_deinit(&ctx, &recv);
     sockaccept_deinit(&ctx, &accept);
     socket_deinit(&ctx, &sock);
     context_deinit(&ctx);

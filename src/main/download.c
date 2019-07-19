@@ -402,7 +402,7 @@ int main(int argc, const char **argv)
     if (ctx.error)
         goto exit;
 
-    log_debug(&ctx, "status: `%s`", req.recv.status);
+    log_debug(&ctx, "start: `%s`", req.recv.start);
     size_t i, n = req.recv.header_count;
     for (i = 0; i < n; i++) {
         log_debug(&ctx, "header: `%s`: `%s`",

@@ -666,8 +666,8 @@ typedef struct {
     Task task;
     SockRecv recv;
 
-    const char *status;
-    int status_len;
+    const char *start;
+    int start_len;
 
     HttpHeader *headers;
     int header_count;

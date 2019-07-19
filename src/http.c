@@ -8,7 +8,7 @@
 
 
 static bool httprecv_blocked(Context *ctx, Task *task);
-static void httprecv_set_status(Context *ctx, HttpRecv *req, uint8_t *line,
+static void httprecv_set_start(Context *ctx, HttpRecv *req, uint8_t *line,
                                int line_len);
 static void httprecv_add_header(Context *ctx, HttpRecv *req, uint8_t *line,
                                int line_len);
@@ -93,8 +93,8 @@ bool httprecv_blocked(Context *ctx, Task *task)
         if (line_len == 0) { // end of headers
             empty_line = true;
             break;
-        } else if (!req->status) { // status
-            httprecv_set_status(ctx, req, line, line_len);
+        } else if (!req->start) { // start line
+            httprecv_set_start(ctx, req, line, line_len);
         } else {
             httprecv_add_header(ctx, req, line, line_len);
         }
@@ -124,31 +124,31 @@ void httprecv_end_header(Context *ctx, HttpRecv *req)
 
     req->task.block.type = BLOCK_NONE;
 
-    if (!req->status) {
-        context_panic(ctx, ERROR_VALUE, "missing HTTP status line");
+    if (!req->start) {
+        context_panic(ctx, ERROR_VALUE, "missing HTTP start line");
         return;
     }
 
-    bool has_content_length = false;
+    const char *content_length_str = NULL;
     size_t i, n = req->header_count;
     const HttpHeader *header;
 
     for (i = 0; i < n; i++) {
         header = &req->headers[i];
         if (strcmp(header->key, "Content-Length") == 0) {
-            has_content_length = true;
+            content_length_str = header->value;
             break;
         }
     }
 
-    if (!has_content_length) {
-        context_panic(ctx, ERROR_VALUE, "missing HTTP `Content-Length` header");
-        return;
+    if (!content_length_str) {
+        // TODO: handle Transfer-Encoding: chunked
+        content_length_str = "0";
     }
 
     char *end;
     errno = 0;
-    intmax_t content_length = strtoimax(header->value, &end, 10);
+    intmax_t content_length = strtoimax(content_length_str, &end, 10);
 
     if (*end != '\0' || content_length < 0) {
         context_panic(ctx, ERROR_VALUE,
@@ -263,7 +263,7 @@ bool httprecv_advance(Context *ctx, HttpRecv *req)
 }
 
 
-void httprecv_set_status(Context *ctx, HttpRecv *req, uint8_t *line,
+void httprecv_set_start(Context *ctx, HttpRecv *req, uint8_t *line,
                          int line_len)
 {
     if (ctx->error)
@@ -271,12 +271,12 @@ void httprecv_set_status(Context *ctx, HttpRecv *req, uint8_t *line,
 
     assert_ascii(ctx, line, line_len);
     if (ctx->error) {
-        context_panic(ctx, ctx->error, "failed parsing HTTP status line: %s",
+        context_panic(ctx, ctx->error, "failed parsing HTTP start line: %s",
                       ctx->message);
         return;
     }
-    req->status = (char *)line;
-    req->status_len = line_len;
+    req->start = (char *)line;
+    req->start_len = line_len;
 }
 
 
@@ -397,8 +397,8 @@ void httprecv_grow_buffer(Context *ctx, HttpRecv *req, size_t add)
     req->data = (uint8_t *)new_buffer + (req->data - (uint8_t *)old_buffer);
     req->data_max += new_buffer_len - old_buffer_len;
 
-    if (req->status) {
-        req->status = new_buffer + (req->status - old_buffer);
+    if (req->start) {
+        req->start = new_buffer + (req->start - old_buffer);
     }
 
     size_t i, n = req->header_count;

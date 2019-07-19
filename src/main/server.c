@@ -51,6 +51,8 @@ int main(int argc, const char **argv)
         printf("\n----------------------------------------\n");
     }
 
+    // TODO: shutdown
+
     if (ctx.error) {
         fprintf(stderr, "error: %s\n", ctx.message);
         status = EXIT_FAILURE;

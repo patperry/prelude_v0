@@ -420,6 +420,8 @@ int main(int argc, const char **argv)
         printf("\n----------------------------------------\n");
     }
 
+    // TODO: shutdown
+
 exit:
     if (ctx.error) {
         fprintf(stderr, "error: %s\n", ctx.message);

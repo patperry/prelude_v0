@@ -226,7 +226,7 @@ static bool httpget_starttls_blocked(Context *ctx, HttpGet *req)
 
     req->buffer_len = buffer_len;
     snprintf(req->buffer, req->buffer_len, format, req->target, req->host);
-    log_debug(ctx, "sending message: |\n%s", req->buffer);
+    log_debug(ctx, "sending message: |\n%s", (char *)req->buffer);
     socksend_init(ctx, &req->send, &req->sock, req->buffer,
                (int)strlen(req->buffer));
 

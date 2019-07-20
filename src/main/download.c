@@ -75,6 +75,7 @@ typedef struct {
     Task task;
     HttpGetState state;
     const char *host;
+    const char *service;
     const char *target;
     TlsContext *tls;
 
@@ -103,7 +104,7 @@ static bool httpget_start(Context *ctx, HttpGet *req)
         return false;
 
     log_debug(ctx, "getting address information for host %s", req->host);
-    getaddrinfo_init(ctx, &req->getaddr, req->host, "https",
+    getaddrinfo_init(ctx, &req->getaddr, req->host, req->service,
                      SOCKET_TCP, IP_NONE, 0);
 
     log_debug(ctx, "getaddr started");
@@ -228,7 +229,7 @@ static bool httpget_starttls_blocked(Context *ctx, HttpGet *req)
     snprintf(req->buffer, req->buffer_len, format, req->target, req->host);
     log_debug(ctx, "sending message: |\n%s", (char *)req->buffer);
     socksend_init(ctx, &req->send, &req->sock, req->buffer,
-               (int)strlen(req->buffer));
+                  (int)strlen(req->buffer));
 
     log_debug(ctx, "starttls finished");
     log_debug(ctx, "send started");
@@ -274,7 +275,6 @@ static bool httpget_recv_blocked(Context *ctx, HttpGet *req)
     req->state = HTTPGET_FINISH;
     return false;
 }
-
 
 
 bool httpget_blocked(Context *ctx, Task *task)
@@ -327,7 +327,7 @@ bool httpget_blocked(Context *ctx, Task *task)
 
 
 void httpget_init(Context *ctx, HttpGet *req, const char *host,
-                  const char *target, TlsContext *tls)
+                  const char *service, const char *target, TlsContext *tls)
 {
     memset(req, 0, sizeof(*req));
     if (ctx->error)
@@ -335,6 +335,7 @@ void httpget_init(Context *ctx, HttpGet *req, const char *host,
 
     req->state = HTTPGET_START;
     req->host = host;
+    req->service = service;
     req->target = target;
     req->task.block.type = BLOCK_NONE;
     req->task._blocked = httpget_blocked;
@@ -394,9 +395,9 @@ int main(int argc, const char **argv)
     tlscontext_init(&ctx, &tls, TLSPROTO_TLS, TLSMETHOD_CLIENT);
 
     HttpGet req;
-    //httpget_init(&ctx, &req, "www.unicode.org",
+    //httpget_init(&ctx, &req, "www.unicode.org", "http",
     //             "/Public/12.0.0/ucd/UnicodeData.txt");
-    httpget_init(&ctx, &req, "www.openssl.org", "/index.html", &tls);
+    httpget_init(&ctx, &req, "www.openssl.org", "https", "/index.html", &tls);
 
     task_await(&ctx, &req.task);
     if (ctx.error)

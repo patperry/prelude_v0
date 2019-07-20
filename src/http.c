@@ -131,7 +131,7 @@ void httprecv_end_header(Context *ctx, HttpRecv *req)
 
     const char *content_length_str = NULL;
     size_t i, n = req->header_count;
-    const HttpHeader *header;
+    const HttpMeta *header;
 
     for (i = 0; i < n; i++) {
         header = &req->headers[i];
@@ -205,7 +205,6 @@ bool httpcontent_blocked(Context *ctx, Task *task)
     if (req->content_read < req->content_length) {
         work = &req->recv.task;
     } else {
-        //work = &req->shutdown.task;
         work = NULL;
     }
 
@@ -403,7 +402,7 @@ void httprecv_grow_buffer(Context *ctx, HttpRecv *req, size_t add)
 
     size_t i, n = req->header_count;
     for (i = 0; i < n; i++) {
-        HttpHeader *header = &req->headers[i];
+        HttpMeta *header = &req->headers[i];
         header->key = new_buffer + (header->key - old_buffer);
         header->value = new_buffer + (header->value - old_buffer);
     }

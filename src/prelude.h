@@ -654,7 +654,7 @@ void getaddrinfo_deinit(Context *ctx, GetAddrInfo *req);
 typedef struct {
     const char *key;
     const char *value;
-} HttpHeader;
+} HttpMeta;
 
 typedef struct {
     Task task;
@@ -669,15 +669,19 @@ typedef struct {
     const char *start;
     int start_len;
 
-    HttpHeader *headers;
+    HttpMeta *headers;
     int header_count;
     int header_capacity;
 
-    size_t content_length;
-    size_t content_read;
+    int64_t content_length;
+    int64_t content_read;
     bool content_started;
 
     HttpContent current;
+
+    HttpMeta *trailers;
+    int trailer_count;
+    int trailer_capacity;
 
     void *buffer;
     uint8_t *data;

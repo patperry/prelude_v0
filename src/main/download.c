@@ -404,13 +404,13 @@ int main(int argc, const char **argv)
         goto exit;
 
     log_debug(&ctx, "start: `%s`", req.recv.start);
-    size_t i, n = req.recv.header_count;
+    int i, n = req.recv.header_count;
     for (i = 0; i < n; i++) {
         log_debug(&ctx, "header: `%s`: `%s`",
                   req.recv.headers[i].key, req.recv.headers[i].value);
     }
 
-    log_debug(&ctx, "content-length: %zu", req.recv.content_length);
+    log_debug(&ctx, "content-length: %"PRId64, req.recv.content_length);
 
     while (httprecv_advance(&ctx, &req.recv)) {
         task_await(&ctx, &req.recv.current.task);
@@ -419,6 +419,12 @@ int main(int argc, const char **argv)
         printf("%.*s", (int)req.recv.current.data_len,
                (char *)req.recv.current.data);
         printf("\n----------------------------------------\n");
+    }
+
+    n = req.recv.trailer_count;
+    for (i = 0; i < n; i++) {
+        log_debug(&ctx, "trailer: `%s`: `%s`",
+                  req.recv.trailers[i].key, req.recv.trailers[i].value);
     }
 
     // TODO: shutdown

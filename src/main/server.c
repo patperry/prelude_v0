@@ -40,8 +40,6 @@ int main(int argc, const char **argv)
                   recv.headers[i].key, recv.headers[i].value);
     }
 
-    log_debug(&ctx, "content-length: %zu", recv.content_length);
-
     while (httprecv_advance(&ctx, &recv)) {
         task_await(&ctx, &recv.current.task);
         log_debug(&ctx, "read %d bytes", (int)recv.current.data_len);
@@ -51,7 +49,13 @@ int main(int argc, const char **argv)
         printf("\n----------------------------------------\n");
     }
 
-    // TODO: shutdown
+    SockShutdown peer_shutdown;
+    sockshutdown_init(&ctx, &peer_shutdown, &accept.peer_sock);
+    task_await(&ctx, &peer_shutdown.task);
+
+    SockShutdown shutdown;
+    sockshutdown_init(&ctx, &shutdown, &sock);
+    task_await(&ctx, &shutdown.task);
 
     if (ctx.error) {
         fprintf(stderr, "error: %s\n", ctx.message);

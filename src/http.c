@@ -135,7 +135,7 @@ void httprecv_end_header(Context *ctx, HttpRecv *req)
     }
 
     const char *content_length_str = NULL;
-    size_t i, n = req->header_count;
+    int i, n = req->header_count;
     const HttpMeta *header;
 
     for (i = 0; i < n; i++) {
@@ -159,14 +159,13 @@ void httprecv_end_header(Context *ctx, HttpRecv *req)
         context_panic(ctx, ERROR_VALUE,
                       "invalid HTTP `Content-Length` value: `%s`",
                       header->value);
-    } else if (errno == ERANGE) {
+    } else if (errno == ERANGE || content_length > INT64_MAX) {
         context_panic(ctx, ERROR_OVERFLOW,
                       "HTTP `Content-Length` value `%s`"
-                      " exceeds maximum (%"PRIdMAX")",
-                      header->value, (intmax_t)INTMAX_MAX);
+                      " exceeds maximum (%"PRId64")",
+                      header->value, INT64_MAX);
     } else {
-        assert(SIZE_MAX >= INTMAX_MAX);
-        req->content_length = (size_t)content_length;
+        req->content_length = (int64_t)content_length;
         httpcontent_init(ctx, &req->current);
     }
 
@@ -304,10 +303,12 @@ void httprecv_add_meta(Context *ctx, HttpRecv *req, MetaType type,
         i = req->header_count;
         desc = "header";
         break;
+
     case META_TRAILER:
         i = req->trailer_count;
         desc = "trailer";
         break;
+
     default:
         assert(0);
     }
@@ -339,8 +340,8 @@ void httprecv_add_meta(Context *ctx, HttpRecv *req, MetaType type,
     while (value < end && isspace(end[-1])) {
         end--;
     }
-
     *end = '\0';
+
     switch (type) {
     case META_HEADER:
         req->headers[i].key = key;
@@ -357,6 +358,7 @@ void httprecv_add_meta(Context *ctx, HttpRecv *req, MetaType type,
     default:
         assert(0);
     }
+
     req->meta_count++;
 }
 

@@ -341,9 +341,23 @@ void httprecv_add_meta(Context *ctx, HttpRecv *req, MetaType type,
     }
 
     *end = '\0';
-    req->headers[i].key = key;
-    req->headers[i].value = value;
-    req->header_count = i + 1;
+    switch (type) {
+    case META_HEADER:
+        req->headers[i].key = key;
+        req->headers[i].value = value;
+        req->header_count = i + 1;
+        break;
+
+    case META_TRAILER:
+        req->trailers[i].key = key;
+        req->trailers[i].value = value;
+        req->trailer_count = i + 1;
+        break;
+
+    default:
+        assert(0);
+    }
+    req->meta_count++;
 }
 
 
@@ -420,11 +434,11 @@ void httprecv_grow_buffer(Context *ctx, HttpRecv *req, size_t add)
         req->start = new_buffer + (req->start - old_buffer);
     }
 
-    size_t i, n = req->header_count;
+    int i, n = req->meta_count;
     for (i = 0; i < n; i++) {
-        HttpMeta *header = &req->headers[i];
-        header->key = new_buffer + (header->key - old_buffer);
-        header->value = new_buffer + (header->value - old_buffer);
+        HttpMeta *meta = &req->metas[i];
+        meta->key = new_buffer + (meta->key - old_buffer);
+        meta->value = new_buffer + (meta->value - old_buffer);
     }
 }
 

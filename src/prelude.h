@@ -669,19 +669,21 @@ typedef struct {
     const char *start;
     int start_len;
 
+    HttpMeta *metas;
+    int meta_count;
+    int meta_capacity;
+
     HttpMeta *headers;
     int header_count;
-    int header_capacity;
+
+    HttpMeta *trailers;
+    int trailer_count;
 
     int64_t content_length;
     int64_t content_read;
     bool content_started;
 
     HttpContent current;
-
-    HttpMeta *trailers;
-    int trailer_count;
-    int trailer_capacity;
 
     void *buffer;
     uint8_t *data;

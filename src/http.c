@@ -1,21 +1,26 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <string.h>
 #include "prelude.h"
 
 #define BUFFER_LEN 4096
 
+typedef enum {
+    META_HEADER,
+    META_TRAILER
+} MetaType;
 
 static bool httprecv_blocked(Context *ctx, Task *task);
 static void httprecv_set_start(Context *ctx, HttpRecv *req, uint8_t *line,
                                int line_len);
-static void httprecv_add_header(Context *ctx, HttpRecv *req, uint8_t *line,
-                               int line_len);
+static void httprecv_add_meta(Context *ctx, HttpRecv *req,
+                              MetaType type, uint8_t *line, int line_len);
 static void httprecv_end_header(Context *ctx, HttpRecv *req);
 
 
-static void httprecv_grow_headers(Context *ctx, HttpRecv *req, size_t add);
+static void httprecv_grow_metas(Context *ctx, HttpRecv *req, int add);
 static void httprecv_grow_buffer(Context *ctx, HttpRecv *req, size_t add);
 
 static void httpcontent_init(Context *ctx, HttpContent *content);
@@ -96,7 +101,7 @@ bool httprecv_blocked(Context *ctx, Task *task)
         } else if (!req->start) { // start line
             httprecv_set_start(ctx, req, line, line_len);
         } else {
-            httprecv_add_header(ctx, req, line, line_len);
+            httprecv_add_meta(ctx, req, META_HEADER, line, line_len);
         }
     }
 
@@ -279,25 +284,39 @@ void httprecv_set_start(Context *ctx, HttpRecv *req, uint8_t *line,
 }
 
 
-void httprecv_add_header(Context *ctx, HttpRecv *req, uint8_t *line,
-                         int line_len)
+void httprecv_add_meta(Context *ctx, HttpRecv *req, MetaType type,
+                       uint8_t *line, int line_len)
 {
     if (ctx->error)
         return;
 
-    if (req->header_count == req->header_capacity) {
-        httprecv_grow_headers(ctx, req, 1);
+    if (req->meta_count == req->meta_capacity) {
+        httprecv_grow_metas(ctx, req, 1);
         if (ctx->error)
             return;
     }
 
-    size_t i = req->header_count;
+    int i;
+    const char *desc;
+
+    switch (type) {
+    case META_HEADER:
+        i = req->header_count;
+        desc = "header";
+        break;
+    case META_TRAILER:
+        i = req->trailer_count;
+        desc = "trailer";
+        break;
+    default:
+        assert(0);
+    }
 
     assert_ascii(ctx, line, line_len);
     if (ctx->error) {
         context_panic(ctx, ERROR_VALUE,
-            "failed parsing HTTP header line in position %zu: %s",
-            i + 1, ctx->message);
+            "failed parsing HTTP %s line in position %d: %s",
+            desc, i + 1, ctx->message);
         return;
     }
 
@@ -305,8 +324,8 @@ void httprecv_add_header(Context *ctx, HttpRecv *req, uint8_t *line,
     char *colon = strstr(key, ":");
     if (!colon) {
         context_panic(ctx, ERROR_VALUE,
-                      "failed parsing HTTP header line in position %zu: %s",
-                      i + 1, "missing colon (:)");
+                      "failed parsing HTTP %s line in position %d: %s",
+                      desc, i + 1, "missing colon (:)");
         return;
     }
     *colon = '\0';
@@ -328,19 +347,19 @@ void httprecv_add_header(Context *ctx, HttpRecv *req, uint8_t *line,
 }
 
 
-void httprecv_grow_headers(Context *ctx, HttpRecv *req, size_t add)
+void httprecv_grow_metas(Context *ctx, HttpRecv *req, int add)
 {
-    if (ctx->error || add == 0)
+    if (ctx->error || add <= 0)
         return;
 
-    size_t old_max = req->header_capacity;
-    if (old_max / 2 > SIZE_MAX || old_max > SIZE_MAX - add) {
+    int old_max = req->meta_capacity;
+    if (old_max / 2 > INT_MAX || old_max > INT_MAX - add) {
         context_panic(ctx, ERROR_OVERFLOW,
-                      "header count exceeds maximum (%zu)", SIZE_MAX);
+                      "meta count exceeds maximum (%d)", INT_MAX);
         return;
     }
 
-    size_t new_max;
+    int new_max;
     if (add > old_max) {
         new_max = old_max + add;
     } else {
@@ -351,13 +370,14 @@ void httprecv_grow_headers(Context *ctx, HttpRecv *req, size_t add)
         new_max = 32;
     }
 
-    size_t old_size = old_max * sizeof(*req->headers);
-    size_t new_size = new_max * sizeof(*req->headers);
-    req->headers = memory_realloc(ctx, req->headers, old_size, new_size);
+    size_t old_size = old_max * sizeof(*req->metas);
+    size_t new_size = new_max * sizeof(*req->metas);
+    req->metas = memory_realloc(ctx, req->metas, old_size, new_size);
     if (ctx->error)
         return;
-
-    req->header_capacity = new_max;
+    req->headers = req->metas;
+    req->trailers = req->headers + req->header_count;
+    req->meta_capacity = new_max;
 }
 
 

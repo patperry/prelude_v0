@@ -72,7 +72,7 @@ typedef enum {
 
 
 typedef struct {
-    Task task;
+    TaskPart taskpart;
     HttpGetState state;
     const char *host;
     const char *service;
@@ -118,8 +118,8 @@ static bool httpget_getaddr_blocked(Context *ctx, HttpGet *req)
     if (ctx->error)
         return false;
 
-    if (task_blocked(ctx, &req->getaddr.task)) {
-        req->task.block = req->getaddr.task.block;
+    if (taskpart_blocked(ctx, &req->getaddr.taskpart)) {
+        req->taskpart.block = req->getaddr.taskpart.block;
         return true;
     }
 
@@ -176,8 +176,8 @@ static bool httpget_connect_blocked(Context *ctx, HttpGet *req)
     if (ctx->error)
         return false;
 
-    if (task_blocked(ctx, &req->conn.task)) {
-        req->task.block = req->conn.task.block;
+    if (taskpart_blocked(ctx, &req->conn.taskpart)) {
+        req->taskpart.block = req->conn.taskpart.block;
         return true;
     }
 
@@ -205,8 +205,8 @@ static bool httpget_starttls_blocked(Context *ctx, HttpGet *req)
     if (ctx->error)
         return false;
 
-    if (task_blocked(ctx, &req->starttls.task)) {
-        req->task.block = req->starttls.task.block;
+    if (taskpart_blocked(ctx, &req->starttls.taskpart)) {
+        req->taskpart.block = req->starttls.taskpart.block;
         return true;
     }
 
@@ -245,8 +245,8 @@ static bool httpget_send_blocked(Context *ctx, HttpGet *req)
     if (ctx->error)
         return false;
 
-    if (task_blocked(ctx, &req->send.task)) {
-        req->task.block = req->send.task.block;
+    if (taskpart_blocked(ctx, &req->send.taskpart)) {
+        req->taskpart.block = req->send.taskpart.block;
         return true;
     }
 
@@ -266,8 +266,8 @@ static bool httpget_recv_blocked(Context *ctx, HttpGet *req)
     if (ctx->error)
         return false;
 
-    if (task_blocked(ctx, &req->recv.task)) {
-        req->task.block = req->recv.task.block;
+    if (taskpart_blocked(ctx, &req->recv.taskpart)) {
+        req->taskpart.block = req->recv.taskpart.block;
         return true;
     }
 
@@ -277,9 +277,9 @@ static bool httpget_recv_blocked(Context *ctx, HttpGet *req)
 }
 
 
-bool httpget_blocked(Context *ctx, Task *task)
+bool httpget_blocked(Context *ctx, TaskPart *taskpart)
 {
-    HttpGet *req = (HttpGet *)task;
+    HttpGet *req = (HttpGet *)taskpart;
 
     while (true) {
         if (ctx->error)
@@ -337,8 +337,8 @@ void httpget_init(Context *ctx, HttpGet *req, const char *host,
     req->host = host;
     req->service = service;
     req->target = target;
-    req->task.block.type = BLOCK_NONE;
-    req->task._blocked = httpget_blocked;
+    req->taskpart.block.type = BLOCK_NONE;
+    req->taskpart._blocked = httpget_blocked;
     req->tls = tls;
 }
 
@@ -399,7 +399,7 @@ int main(int argc, const char **argv)
     //             "/Public/12.0.0/ucd/UnicodeData.txt");
     httpget_init(&ctx, &req, "www.openssl.org", "https", "/index.html", &tls);
 
-    task_await(&ctx, &req.task);
+    taskpart_await(&ctx, &req.taskpart);
     if (ctx.error)
         goto exit;
 
@@ -413,7 +413,7 @@ int main(int argc, const char **argv)
     log_debug(&ctx, "content-length: %"PRId64, req.recv.content_length);
 
     while (httprecv_advance(&ctx, &req.recv)) {
-        task_await(&ctx, &req.recv.current.task);
+        taskpart_await(&ctx, &req.recv.current.taskpart);
         log_debug(&ctx, "read %d bytes", (int)req.recv.current.data_len);
         printf("----------------------------------------\n");
         printf("%.*s", (int)req.recv.current.data_len,

@@ -27,11 +27,11 @@ int main(int argc, const char **argv)
 
     SockAccept accept;
     sockaccept_init(&ctx, &accept, &sock);
-    task_await(&ctx, &accept.task);
+    taskpart_await(&ctx, &accept.taskpart);
 
     HttpRecv recv;
     httprecv_init(&ctx, &recv, &accept.peer_sock);
-    task_await(&ctx, &recv.task);
+    taskpart_await(&ctx, &recv.taskpart);
 
     log_debug(&ctx, "start: `%s`", recv.start);
     size_t i, n = recv.header_count;
@@ -41,7 +41,7 @@ int main(int argc, const char **argv)
     }
 
     while (httprecv_advance(&ctx, &recv)) {
-        task_await(&ctx, &recv.current.task);
+        taskpart_await(&ctx, &recv.current.taskpart);
         log_debug(&ctx, "read %d bytes", (int)recv.current.data_len);
         printf("----------------------------------------\n");
         printf("%.*s", (int)recv.current.data_len,
@@ -51,11 +51,11 @@ int main(int argc, const char **argv)
 
     SockShutdown peer_shutdown;
     sockshutdown_init(&ctx, &peer_shutdown, &accept.peer_sock);
-    task_await(&ctx, &peer_shutdown.task);
+    taskpart_await(&ctx, &peer_shutdown.taskpart);
 
     SockShutdown shutdown;
     sockshutdown_init(&ctx, &shutdown, &sock);
-    task_await(&ctx, &shutdown.task);
+    taskpart_await(&ctx, &shutdown.taskpart);
 
     if (ctx.error) {
         fprintf(stderr, "error: %s\n", ctx.message);

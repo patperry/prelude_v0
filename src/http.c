@@ -12,7 +12,7 @@ typedef enum {
     META_TRAILER
 } MetaType;
 
-static bool httprecv_blocked(Context *ctx, Task *task);
+static bool httprecv_blocked(Context *ctx, TaskPart *taskpart);
 static void httprecv_set_start(Context *ctx, HttpRecv *req, uint8_t *line,
                                int line_len);
 static void httprecv_add_meta(Context *ctx, HttpRecv *req,
@@ -25,7 +25,7 @@ static void httprecv_grow_buffer(Context *ctx, HttpRecv *req, size_t add);
 
 static void httpcontent_init(Context *ctx, HttpContent *content);
 static void httpcontent_deinit(Context *ctx, HttpContent *content);
-static bool httpcontent_blocked(Context *ctx, Task *task);
+static bool httpcontent_blocked(Context *ctx, TaskPart *taskpart);
 
 
 
@@ -48,8 +48,8 @@ void httprecv_init(Context *ctx, HttpRecv *req, Socket *sock)
     req->data_max = req->buffer_len;
 
     sockrecv_init(ctx, &req->recv, sock, req->data, BUFFER_LEN);
-    req->task.block.type = BLOCK_NONE;
-    req->task._blocked = httprecv_blocked;
+    req->taskpart.block.type = BLOCK_NONE;
+    req->taskpart._blocked = httprecv_blocked;
 }
 
 
@@ -61,21 +61,21 @@ void httprecv_deinit(Context *ctx, HttpRecv *req)
 }
 
 
-bool httprecv_blocked(Context *ctx, Task *task)
+bool httprecv_blocked(Context *ctx, TaskPart *taskpart)
 {
     log_debug(ctx, "waiting on httprecv");
 
     if (ctx->error)
         return false;
 
-    HttpRecv *req = (HttpRecv *)task;
-    if (task_blocked(ctx, &req->recv.task)) {
+    HttpRecv *req = (HttpRecv *)taskpart;
+    if (taskpart_blocked(ctx, &req->recv.taskpart)) {
         log_debug(ctx, "socket recv is blocked");
-        req->task.block = req->recv.task.block;
+        req->taskpart.block = req->recv.taskpart.block;
         log_debug(ctx, "httprecv requires %s on fd %d",
-                  req->task.block.job.io.flags == IO_READ ? "read"
-                  : req->task.block.job.io.flags == IO_WRITE ? "write"
-                  : "void", req->task.block.job.io.fd);
+                  req->taskpart.block.job.io.flags == IO_READ ? "read"
+                  : req->taskpart.block.job.io.flags == IO_WRITE ? "write"
+                  : "void", req->taskpart.block.job.io.fd);
         return true;
     }
     log_debug(ctx, "socket recv completed");
@@ -127,7 +127,7 @@ void httprecv_end_header(Context *ctx, HttpRecv *req)
     if (ctx->error)
         return;
 
-    req->task.block.type = BLOCK_NONE;
+    req->taskpart.block.type = BLOCK_NONE;
 
     if (!req->start) {
         context_panic(ctx, ERROR_VALUE, "missing HTTP start line");
@@ -186,7 +186,7 @@ void httpcontent_init(Context *ctx, HttpContent *content)
     memset(content, 0, sizeof(*content));
     if (ctx->error)
         return;
-    content->task._blocked = httpcontent_blocked;
+    content->taskpart._blocked = httpcontent_blocked;
 }
 
 
@@ -197,27 +197,27 @@ void httpcontent_deinit(Context *ctx, HttpContent *content)
 }
 
 
-bool httpcontent_blocked(Context *ctx, Task *task)
+bool httpcontent_blocked(Context *ctx, TaskPart *taskpart)
 {
     if (ctx->error)
         return false;
 
-    HttpContent *content = (HttpContent *)task;
+    HttpContent *content = (HttpContent *)taskpart;
     HttpRecv *req = container_of(content, HttpRecv, current);
 
-    Task *work;
+    TaskPart *work;
     if (req->content_read < req->content_length) {
-        work = &req->recv.task;
+        work = &req->recv.taskpart;
     } else {
         work = NULL;
     }
 
-    if (work && task_blocked(ctx, work)) {
-        content->task.block = work->block;
+    if (work && taskpart_blocked(ctx, work)) {
+        content->taskpart.block = work->block;
         return true;
     }
 
-    content->task.block.type = BLOCK_NONE;
+    content->taskpart.block.type = BLOCK_NONE;
     return false;
 }
 

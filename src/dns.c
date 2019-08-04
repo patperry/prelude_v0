@@ -7,7 +7,7 @@
 
 #include "prelude.h"
 
-static bool getaddrinfo_blocked(Context *ctx, Task *task);
+static bool getaddrinfo_blocked(Context *ctx, TaskPart *taskpart);
 
 
 void getaddrinfo_init(Context *ctx, GetAddrInfo *req, const char *node,
@@ -15,7 +15,7 @@ void getaddrinfo_init(Context *ctx, GetAddrInfo *req, const char *node,
                       int flags)
 {
     memory_clear(ctx, req, sizeof(*req));
-    req->task._blocked = getaddrinfo_blocked;
+    req->taskpart._blocked = getaddrinfo_blocked;
     req->node = node;
     req->service = service;
     req->type = type;
@@ -35,12 +35,12 @@ void getaddrinfo_deinit(Context *ctx, GetAddrInfo *req)
 }
 
 
-bool getaddrinfo_blocked(Context *ctx, Task *task)
+bool getaddrinfo_blocked(Context *ctx, TaskPart *taskpart)
 {
     if (ctx->error)
         return false;
 
-    GetAddrInfo *req = (GetAddrInfo *)task;
+    GetAddrInfo *req = (GetAddrInfo *)taskpart;
     struct addrinfo hints = {0};
 
     switch (req->type) {

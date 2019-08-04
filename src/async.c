@@ -7,33 +7,33 @@ static void await_io(Context *ctx, BlockIO *block);
 static void await_timer(Context *ctx, BlockTimer *block);
 
 
-bool task_blocked(Context *ctx, Task *task)
+bool taskpart_blocked(Context *ctx, TaskPart *taskpart)
 {
     if (ctx->error)
         return false;
 
-    return (task->_blocked)(ctx, task);
+    return (taskpart->_blocked)(ctx, taskpart);
 }
 
 
-bool task_advance(Context *ctx, Task *task)
+bool taskpart_advance(Context *ctx, TaskPart *taskpart)
 {
     if (ctx->error)
         return false;
 
-    if (!task_blocked(ctx, task)) {
+    if (!taskpart_blocked(ctx, taskpart)) {
         return false;
     }
 
     log_debug(ctx, "blocked. waiting...");
-    switch (task->block.type) {
+    switch (taskpart->block.type) {
     case BLOCK_NONE:
         break;
     case BLOCK_IO:
-        await_io(ctx, &task->block.job.io);
+        await_io(ctx, &taskpart->block.job.io);
         break;
     case BLOCK_TIMER:
-        await_timer(ctx, &task->block.job.timer);
+        await_timer(ctx, &taskpart->block.job.timer);
         break;
     }
 
@@ -41,12 +41,12 @@ bool task_advance(Context *ctx, Task *task)
 }
 
 
-void task_await(Context *ctx, Task *task)
+void taskpart_await(Context *ctx, TaskPart *taskpart)
 {
     if (ctx->error)
         return;
 
-    while (task_advance(ctx, task)) {
+    while (taskpart_advance(ctx, taskpart)) {
         // pass
     }
 }

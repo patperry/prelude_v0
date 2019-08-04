@@ -141,14 +141,14 @@ typedef struct {
 } Block;
 
 
-typedef struct Task {
+typedef struct TaskPart {
     Block block;
-    bool (*_blocked)(Context *ctx, struct Task *task);
-} Task;
+    bool (*_blocked)(Context *ctx, struct TaskPart *taskpart);
+} TaskPart;
 
-bool task_blocked(Context *ctx, Task *task);
-bool task_advance(Context *ctx, Task *task);
-void task_await(Context *ctx, Task *task);
+bool taskpart_blocked(Context *ctx, TaskPart *taskpart);
+bool taskpart_advance(Context *ctx, TaskPart *taskpart);
+void taskpart_await(Context *ctx, TaskPart *taskpart);
 
 /**@}*/
 
@@ -536,7 +536,7 @@ void socket_listen(Context *ctx, Socket *sock, int backlog);
 
 
 typedef struct {
-    Task task;
+    TaskPart taskpart;
     Socket *sock;
     const SocketAddr *addr;
     bool started;
@@ -548,7 +548,7 @@ void sockconnect_deinit(Context *ctx, SockConnect *conn);
 
 
 typedef struct {
-    Task task;
+    TaskPart taskpart;
     Socket *sock;
     Socket peer_sock;
     SocketAddr peer_address;
@@ -559,7 +559,7 @@ void sockaccept_deinit(Context *ctx, SockAccept *req);
 
 
 typedef struct {
-    Task task;
+    TaskPart taskpart;
     Socket *sock;
 } SockShutdown;
 
@@ -567,7 +567,7 @@ void sockshutdown_init(Context *ctx, SockShutdown *req, Socket *sock);
 void sockshutdown_deinit(Context *ctx, SockShutdown *req);
 
 typedef struct {
-    Task task;
+    TaskPart taskpart;
     Socket *sock;
     TlsContext *tls;
     TlsMethod method;
@@ -578,7 +578,7 @@ void sockstarttls_init(Context *ctx, SockStartTls *req, Socket *sock,
 void sockstarttls_deinit(Context *ctx, SockStartTls *req);
 
 typedef struct {
-    Task task;
+    TaskPart taskpart;
     Socket *sock;
 } SockStopTls;
 
@@ -586,7 +586,7 @@ void sockstoptls_init(Context *ctx, SockStopTls *req, Socket *sock);
 void sockstoptls_deinit(Context *ctx, SockStopTls *req);
 
 typedef struct {
-    Task task;
+    TaskPart taskpart;
     Socket *sock;
     void *buffer;
     int length;
@@ -599,7 +599,7 @@ void sockrecv_reset(Context *ctx, SockRecv *req, void *buffer, int length);
 void sockrecv_deinit(Context *ctx, SockRecv *req);
 
 typedef struct {
-    Task task;
+    TaskPart taskpart;
     Socket *sock;
     void *buffer;
     int length;
@@ -632,7 +632,7 @@ typedef struct {
 bool addrinfoiter_advance(Context *ctx, AddrInfoIter *it);
 
 typedef struct {
-    Task task;
+    TaskPart taskpart;
     AddrInfoIter result;
     const char *node;
     const char *service;
@@ -657,13 +657,13 @@ typedef struct {
 } HttpMeta;
 
 typedef struct {
-    Task task;
+    TaskPart taskpart;
     uint8_t *data;
     int data_len;
 } HttpContent;
 
 typedef struct {
-    Task task;
+    TaskPart taskpart;
     SockRecv recv;
 
     const char *start;

@@ -49,38 +49,41 @@ struct ContextQueue {
     Context *tail;
 };
 
-typedef struct EventQueue {
+typedef struct BlockQueue {
     int handle;
     int count;
-} EventQueue;
+} BlockQueue;
 
 typedef enum {
-    Event_None = 0,
-    Event_IO,
-} EventType;
+    Block_None = 0,
+    Block_IO
+} BlockType;
 
-typedef struct EventIO {
+typedef struct BlockIO {
     int fd;
     IOType type;
-} EventIO;
+} BlockIO;
 
-typedef struct Event {
-    EventType type;
+// BlockTimer; kqueue: EVFILT_TIMER / epoll: timerfd_create
+
+typedef struct Block {
+    BlockType type;
     union {
-        EventIO io;
+        BlockIO io;
     } value;
-    void *udata;
-} Event;
+    void *data;
+} Block;
 
-void EventQueue_Setup(EventQueue *queue);
-void EventQueue_Teardown(EventQueue *queue);
-bool EventQueue_Dequeue(EventQueue *queue, void **udata);
-void EventQueue_EnqueueIO(EventQueue *queue, const EventIO *item, void *udata);
+void BlockQueue_Setup(BlockQueue *queue);
+void BlockQueue_Teardown(BlockQueue *queue);
+bool BlockQueue_Dequeue(BlockQueue *queue, void **data);
+void BlockQueue_EnqueueIO(BlockQueue *queue, const BlockIO *item,
+                            void *data);
 
 
 #if defined(USE_KQUEUE)
 
-void EventQueue_Setup(EventQueue *queue)
+void BlockQueue_Setup(BlockQueue *queue)
 {
     queue->handle = kqueue();
     if (queue->handle == -1) {
@@ -90,16 +93,16 @@ void EventQueue_Setup(EventQueue *queue)
 }
 
 
-void EventQueue_Teardown(EventQueue *queue)
+void BlockQueue_Teardown(BlockQueue *queue)
 {
     close(queue->handle);
 }
 
 
-bool EventQueue_Dequeue(EventQueue *queue, void **udata)
+bool BlockQueue_Dequeue(BlockQueue *queue, void **data)
 {
     if (!queue->count) {
-        *udata = NULL;
+        *data = NULL;
         return false;
     }
 
@@ -112,12 +115,13 @@ bool EventQueue_Dequeue(EventQueue *queue, void **udata)
     assert(ret == 1);
     queue->count--;
 
-    *udata = event.udata;
+    *data = event.udata;
     return true;
 }
 
 
-void EventQueue_EnqueueIO(EventQueue *queue, const EventIO *item, void *udata)
+void BlockQueue_EnqueueIO(BlockQueue *queue, const BlockIO *item,
+                            void *data)
 {
     int fd = item->fd;
     IOType type = item->type;
@@ -135,7 +139,7 @@ void EventQueue_EnqueueIO(EventQueue *queue, const EventIO *item, void *udata)
     }
 
     struct kevent event;
-    EV_SET(&event, fd, filter, EV_ADD | EV_ONESHOT, 0, 0, udata);
+    EV_SET(&event, fd, filter, EV_ADD | EV_ONESHOT, 0, 0, data);
 
     ret = kevent(queue->handle, &event, 1, NULL, 0, NULL);
     if (ret == -1) {
@@ -146,7 +150,7 @@ void EventQueue_EnqueueIO(EventQueue *queue, const EventIO *item, void *udata)
 
 #elif defined(USE_EPOLL)
 
-void EventQueue_Setup(EventQueue *queue)
+void BlockQueue_Setup(BlockQueue *queue)
 {
     queue->handle = epoll_create(1);
     if (queue->handle == -1) {
@@ -156,16 +160,16 @@ void EventQueue_Setup(EventQueue *queue)
 }
 
 
-void EventQueue_Teardown(EventQueue *queue)
+void BlockQueue_Teardown(BlockQueue *queue)
 {
     close(queue->handle);
 }
 
 
-bool EventQueue_Dequeue(EventQueue *queue, void **udata)
+bool BlockQueue_Dequeue(BlockQueue *queue, void **data)
 {
     if (!queue->count) {
-        *udata = NULL;
+        *data = NULL;
         return false;
     }
 
@@ -177,12 +181,12 @@ bool EventQueue_Dequeue(EventQueue *queue, void **udata)
     }
     assert(ret == 1);
     queue->count--;
-    *udata = event.data.ptr;
+    *data = event.data.ptr;
     return true;
 }
 
 
-void EventQueue_EnqueueIO(EventQueue *queue, const EventIO *item, void *udata)
+void BlockQueue_EnqueueIO(BlockQueue *queue, const EventIO *item, void *data)
 {
     int fd = item->fd;
     IOType type = item->type;
@@ -201,7 +205,7 @@ void EventQueue_EnqueueIO(EventQueue *queue, const EventIO *item, void *udata)
 
     struct epoll_event event;
     event.events = events | EPOLLONESHOT;
-    event.data.ptr = udata;
+    event.data.ptr = data;
 
     int ret = epoll_ctl(queue->handle, EPOLL_CTL_MOD, fd, &event);
     // With epoll, ONESHOT disables the fd, not deletes it like kqueue does.
@@ -225,20 +229,20 @@ void EventQueue_EnqueueIO(EventQueue *queue, const EventIO *item, void *udata)
 #endif
 
 
-void EventQueue_Enqueue(EventQueue *queue, const Event *item)
+void BlockQueue_Enqueue(BlockQueue *queue, const Block *item)
 {
     switch (item->type) {
-    case Event_None:
+    case Block_None:
         break;
-    case Event_IO:
-        EventQueue_EnqueueIO(queue, &item->value.io, item->udata);
+    case Block_IO:
+        BlockQueue_EnqueueIO(queue, &item->value.io, item->data);
         break;
     }
 }
 
 
 struct Global {
-    EventQueue event_queue;
+    BlockQueue event_queue;
     ContextQueue context_queue;
 };
 
@@ -322,13 +326,13 @@ Context *ContextQueue_Dequeue(Context *ctx, ContextQueue *queue)
 void Global_Setup(Global *global)
 {
     memset(global, 0, sizeof(*global));
-    EventQueue_Setup(&global->event_queue);
+    BlockQueue_Setup(&global->event_queue);
 }
 
 
 void Global_Teardown(Global *global)
 {
-    EventQueue_Teardown(&global->event_queue);
+    BlockQueue_Teardown(&global->event_queue);
 }
 
 
@@ -361,11 +365,11 @@ Context *Context_Dequeue(Context *ctx)
     Context *item = ContextQueue_Dequeue(ctx, &ctx->global->context_queue);
 
     if (!item) {
-        void *udata;
-        if (!EventQueue_Dequeue(&ctx->global->event_queue, &udata)) {
+        void *data;
+        if (!BlockQueue_Dequeue(&ctx->global->event_queue, &data)) {
             return NULL;
         }
-        item = udata;
+        item = data;
     }
 
     return item;
@@ -470,8 +474,8 @@ void Task_Await(Context *ctx, Task *task)
 
 void Context_UnblockIO(Context *ctx, int fd, IOType type)
 {
-    EventIO event = { .fd = fd, .type = type };
-    EventQueue_EnqueueIO(&ctx->global->event_queue, &event, ctx);
+    BlockIO event = { .fd = fd, .type = type };
+    BlockQueue_EnqueueIO(&ctx->global->event_queue, &event, ctx);
     Context_Yield(ctx);
 }
 

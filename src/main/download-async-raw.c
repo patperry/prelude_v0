@@ -1,5 +1,7 @@
-#define _XOPEN_SOURCE
+#define _POSIX_C_SOURCE 200112L // getaddrinfo
+#define _XOPEN_SOURCE // ucontext
 #include <assert.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -7,15 +9,30 @@
 #include <string.h>
 #include <ucontext.h>
 
-#include <poll.h>
-#include <sys/types.h>
-#include <sys/event.h>
-#include <sys/time.h>
+#include <fcntl.h>
+
+#if defined(__APPLE__) || defined(__FreeBSD__)
+# define USE_KQUEUE
+#endif
+
+#if defined(__linux__)
+# define USE_EPOLL
+#endif
+
+#ifdef USE_KQUEUE
+# include <sys/types.h>
+# include <sys/event.h>
+# include <sys/time.h>
+#endif
+
+#ifdef USE_EPOLL
+# include <sys/epoll.h>
+#endif
+
 #include <sys/socket.h>
+#include <netinet/in.h>
 #include <netdb.h>
 #include <unistd.h>
-
-typedef struct Block Block;
 
 typedef enum {
     IO_NONE = 0,
@@ -32,9 +49,196 @@ struct ContextQueue {
     Context *tail;
 };
 
+typedef struct EventQueue {
+    int handle;
+    int count;
+} EventQueue;
+
+typedef enum {
+    EVENT_NONE = 0,
+    EVENT_IO,
+} EventType;
+
+typedef struct EventIO {
+    int fd;
+    IOType type;
+} EventIO;
+
+typedef struct Event {
+    EventType type;
+    union {
+        EventIO io;
+    } value;
+    void *udata;
+} Event;
+
+void eventqueue_init(EventQueue *queue);
+void eventqueue_deinit(EventQueue *queue);
+bool eventqueue_dequeue(EventQueue *queue, void **udata);
+void eventqueue_enqueue_io(EventQueue *queue, const EventIO *item, void *udata);
+
+
+#if defined(USE_KQUEUE)
+
+void eventqueue_init(EventQueue *queue)
+{
+    queue->handle = kqueue();
+    if (queue->handle == -1) {
+        abort(); // check errno
+    }
+    queue->count = 0;
+}
+
+
+void eventqueue_deinit(EventQueue *queue)
+{
+    close(queue->handle);
+}
+
+
+bool eventqueue_dequeue(EventQueue *queue, void **udata)
+{
+    if (!queue->count) {
+        *udata = NULL;
+        return false;
+    }
+
+    struct kevent event;
+    int ret;
+    ret = kevent(queue->handle, NULL, 0, &event, 1, NULL);
+    if (ret == -1) {
+        abort(); // failure
+    }
+    assert(ret == 1);
+    queue->count--;
+
+    *udata = event.udata;
+    return true;
+}
+
+
+void eventqueue_enqueue_io(EventQueue *queue, const EventIO *item, void *udata)
+{
+    int fd = item->fd;
+    IOType type = item->type;
+    int filter, ret;
+
+    switch (type) {
+    case IO_NONE:
+        return;
+    case IO_READ:
+        filter = EVFILT_READ;
+        break;
+    case IO_WRITE:
+        filter = EVFILT_WRITE;
+        break;
+    }
+
+    struct kevent event;
+    EV_SET(&event, fd, filter, EV_ADD | EV_ONESHOT, 0, 0, udata);
+
+    ret = kevent(queue->handle, &event, 1, NULL, 0, NULL);
+    if (ret == -1) {
+        abort(); // failure
+    }
+    queue->count++;
+}
+
+#elif defined(USE_EPOLL)
+
+void eventqueue_init(EventQueue *queue)
+{
+    queue->handle = epoll_create(1);
+    if (queue->handle == -1) {
+        abort(); // check errno
+    }
+    queue->count = 0;
+}
+
+
+void eventqueue_deinit(EventQueue *queue)
+{
+    close(queue->handle);
+}
+
+
+bool eventqueue_dequeue(EventQueue *queue, void **udata)
+{
+    if (!queue->count) {
+        *udata = NULL;
+        return false;
+    }
+
+    struct epoll_event event;
+    int ret;
+    ret = epoll_wait(queue->handle, &event, 1, -1);
+    if (ret == -1) {
+        abort(); // failure
+    }
+    assert(ret == 1);
+    queue->count--;
+    *udata = event.data.ptr;
+    return true;
+}
+
+
+void eventqueue_enqueue_io(EventQueue *queue, const EventIO *item, void *udata)
+{
+    int fd = item->fd;
+    IOType type = item->type;
+    uint32_t events;
+
+    switch (type) {
+    case IO_NONE:
+        return;
+    case IO_READ:
+        events = EPOLLIN;
+        break;
+    case IO_WRITE:
+        events = EPOLLOUT;
+        break;
+    }
+
+    struct epoll_event event;
+    event.events = events | EPOLLONESHOT;
+    event.data.ptr = udata;
+
+    int ret = epoll_ctl(queue->handle, EPOLL_CTL_MOD, fd, &event);
+    // With epoll, ONESHOT disables the fd, not deletes it like kqueue does.
+    //
+    // The common case is repeated polls on the same file descriptor,
+    // so try MOD before ADD. This is simpler than keeping track of
+    // whether we have added the descriptor already ourselves...
+
+    if (ret == -1 && errno == ENOENT) {
+        ret = epoll_ctl(queue->handle, EPOLL_CTL_ADD, fd, &event);
+        // ...If MOD fails, try ADD.
+    }
+
+    if (ret == -1) {
+        abort(); // failure
+    }
+
+    queue->count++;
+}
+
+#endif
+
+
+void eventqueue_enqueue(EventQueue *queue, const Event *item)
+{
+    switch (item->type) {
+    case EVENT_NONE:
+        break;
+    case EVENT_IO:
+        eventqueue_enqueue_io(queue, &item->value.io, item->udata);
+        break;
+    }
+}
+
+
 struct Global {
-    int event_queue;
-    int event_queue_count;
+    EventQueue event_queue;
     ContextQueue context_queue;
 };
 
@@ -48,16 +252,30 @@ struct Context {
 
 void contextqueue_enqueue(Context *ctx, ContextQueue *queue, Context *item)
 {
+    (void)ctx;
+
+    fprintf(stderr, "> enqueue(%p, %p) { head: %p; tail %p }\n",
+            queue, item, queue->head, queue->tail);
 
     item->prev = queue->tail;
     item->next = NULL;
-    queue->tail->next = item;
+
+    if (queue->tail) {
+        queue->tail->next = item;
+    } else {
+        queue->head = item;
+    }
     queue->tail = item;
+
+    fprintf(stderr, "< enqueue(%p, %p) { head: %p; tail %p }\n",
+            queue, item, queue->head, queue->tail);
 }
 
 
 void contextqueue_steal(Context *ctx, ContextQueue *queue, ContextQueue *other)
 {
+    (void)ctx;
+
     if (!other->head) {
         return;
     } else if (!queue->tail) {
@@ -74,8 +292,15 @@ void contextqueue_steal(Context *ctx, ContextQueue *queue, ContextQueue *other)
 
 Context *contextqueue_dequeue(Context *ctx, ContextQueue *queue)
 {
+    (void)ctx;
+
+    fprintf(stderr, "> dequeue(%p) { head: %p; tail %p }\n",
+            queue, queue->head, queue->tail);
+
     Context *item = queue->head;
     if (!item) {
+        fprintf(stderr, "< dequeue(%p) = NULL { head: %p; tail %p }\n",
+                queue, queue->head, queue->tail);
         return NULL;
     }
 
@@ -87,6 +312,9 @@ Context *contextqueue_dequeue(Context *ctx, ContextQueue *queue)
         queue->tail = NULL;
     }
 
+    fprintf(stderr, "< dequeue(%p) = %p { head: %p; tail %p }\n",
+            queue, item, queue->head, queue->tail);
+
     return item;
 }
 
@@ -94,16 +322,13 @@ Context *contextqueue_dequeue(Context *ctx, ContextQueue *queue)
 void global_init(Global *global)
 {
     memset(global, 0, sizeof(*global));
-    global->event_queue = kqueue();
-    if (global->event_queue < -1) {
-        abort(); // check errno
-    }
+    eventqueue_init(&global->event_queue);
 }
 
 
 void global_deinit(Global *global)
 {
-    close(global->event_queue);
+    eventqueue_deinit(&global->event_queue);
 }
 
 
@@ -136,18 +361,11 @@ Context *context_dequeue(Context *ctx)
     Context *item = contextqueue_dequeue(ctx, &ctx->global->context_queue);
 
     if (!item) {
-        if (!ctx->global->event_queue_count) {
+        void *udata;
+        if (!eventqueue_dequeue(&ctx->global->event_queue, &udata)) {
             return NULL;
         }
-        struct	kevent tevent;
-        int ret;
-        ret = kevent(ctx->global->event_queue, NULL, 0, &tevent, 1, NULL);
-        if (ret == -1) {
-            abort(); // failure
-        }
-        assert(ret == 1);
-        ctx->global->event_queue_count--;
-        item = tevent.udata;
+        item = udata;
     }
 
     return item;
@@ -156,11 +374,14 @@ Context *context_dequeue(Context *ctx)
 
 void context_yield(Context *ctx)
 {
+    fprintf(stderr, "> context_yield(%p)\n", ctx);
     Context *item = context_dequeue(ctx);
 
     if (!item) {
+        fprintf(stderr, "deadlock\n");
         abort(); // deadlock
     } else if (item != ctx) {
+        fprintf(stderr, "< context_yield(%p) to %p\n", ctx, item);
         if (swapcontext(&ctx->uc, &item->uc) < 0) {
             abort(); // failed allocating memory
         }
@@ -172,7 +393,7 @@ typedef struct Task {
     Context context;
     void *stack;
     size_t stack_size;
-    void (*action)(void *state);
+    void (*action)(Context *ctx, void *state);
     void *state;
     bool running;
     ContextQueue waiting;
@@ -181,6 +402,8 @@ typedef struct Task {
 
 void task_init(Context *ctx, Task *task, size_t stack_size)
 {
+    memset(task, 0, sizeof(*task));
+
     task->context = *ctx;
 
     if (getcontext(&task->context.uc) < 0) {
@@ -200,6 +423,7 @@ void task_init(Context *ctx, Task *task, size_t stack_size)
 
 void task_deinit(Context *ctx, Task *task)
 {
+    (void)ctx;
     free(task->stack);
 }
 
@@ -210,17 +434,18 @@ static void taskstart(uint32_t y, uint32_t x)
     z |= y;
     
     Task *task = (Task *)z;
-    task->running = true;
-    task->action(task->state);
-    task->running = false;
     Context *ctx = &task->context;
+
+    task->running = true;
+    task->action(ctx, task->state);
+    task->running = false;
     contextqueue_steal(ctx, &ctx->global->context_queue, &task->waiting);
     context_yield(ctx);
 }
 
 
-void task_run(Context *ctx, Task *task, void (*action)(void *state),
-              void *state)
+void task_run(Context *ctx, Task *task,
+              void (*action)(Context *ctx, void *state), void *state)
 {
     assert(!task->running);
 
@@ -231,7 +456,7 @@ void task_run(Context *ctx, Task *task, void (*action)(void *state),
 	uint32_t y = (uint32_t)z;
 	uint32_t x = z >> 32;
     
-    makecontext(&task->context.uc, taskstart, 2, y, x);
+    makecontext(&task->context.uc, (void (*)(void))taskstart, 2, y, x);
     context_enqueue(ctx, &task->context);
 }
 
@@ -245,41 +470,21 @@ void task_await(Context *ctx, Task *task)
 
 void unblock_io(Context *ctx, int fd, IOType type)
 {
-    int filter, ret;
-
-    switch (type) {
-    case IO_NONE:
-        return;
-    case IO_READ:
-        filter = EVFILT_READ;
-        break;
-    case IO_WRITE:
-        filter = EVFILT_WRITE;
-        break;
-    }
-
-    struct	kevent event;
-    EV_SET(&event, fd, filter, EV_ADD | EV_ONESHOT, 0, 0, ctx);
-
-    ret = kevent(ctx->global->event_queue, &event, 1, NULL, 0, NULL);
-    if (ret == -1) {
-        abort(); // failure
-    }
-    ctx->global->event_queue_count++;
+    EventIO event = { .fd = fd, .type = type };
+    eventqueue_enqueue_io(&ctx->global->event_queue, &event, ctx);
     context_yield(ctx);
 }
 
 
-int main(int argc, const char **argv)
+void download(Context *ctx, void *state)
 {
-    (void)argc;
-    (void)argv;
+    (void)state;
 
     int err = 0;
     const char *hostname = "www.unicode.org";
     // http://www.unicode.org/Public/12.0.0/data/ucd/UnicodeData.txt
     const char *message = 
-        "GET /Public/12.0.0/ucd/UnicodeData.txt HTTP/1.1\r\n"
+        "GET /Public/12.0.0/ucd/UnicodeData.txt HTTP/1.0\r\n"
         "Host: www.unicode.org\r\n"
         "\r\n";
 
@@ -289,8 +494,8 @@ int main(int argc, const char **argv)
     hints.ai_family = PF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     if ((err = getaddrinfo(hostname, "http", &hints, &res0))) {
-        printf("error %s", gai_strerror(err));
-        // error
+        printf("ERROR %s\n", gai_strerror(err));
+        return;
     }
 
     int sockfd = -1;
@@ -300,29 +505,56 @@ int main(int argc, const char **argv)
             // socket failed
             continue;
         }
+        fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK);
 
-        if (connect(sockfd, res->ai_addr, res->ai_addrlen) < 0) {
+        if (connect(sockfd, res->ai_addr, res->ai_addrlen) < 0
+                && errno != EINPROGRESS) {
             // connect failed
             close(sockfd);
             sockfd = -1;
             continue;
         }
 
+        unblock_io(ctx, sockfd, IO_WRITE);
+
         printf("success!\n");
         break; // success
     }
 
-    send(sockfd, message, strlen(message), 0);
+    const char *buf = message;
+    int buf_len = (int)strlen(message);
+    int nsend = 0;
+
+    while (buf_len > 0) {
+        while ((nsend = send(sockfd, buf, buf_len, 0)) < 0
+                    && errno == EAGAIN) {
+            unblock_io(ctx, sockfd, IO_WRITE);
+        }
+        if (nsend < 0) {
+            printf("ERROR writing to socket\n");
+            return;
+        } else if (nsend == 0) {
+            printf("partial write");
+        } else {
+            buf += nsend;
+            buf_len -= nsend;
+        }
+    }
 
     char response[4096];
     memset(response, 0, sizeof(response));
     int total = sizeof(response)-1;
     int bytes = 0;
     do {
-        bytes = recv(sockfd, response, total, 0);
-        if (bytes < 0)
-            printf("ERROR reading response from socket");
-        printf("%s", response);
+        while ((bytes = recv(sockfd, response, total, 0)) < 0
+                    && errno == EAGAIN) {
+            unblock_io(ctx, sockfd, IO_READ);
+        }
+        if (bytes < 0) {
+            printf("ERROR reading response from socket\n");
+            return;
+        }
+        //printf("%s", response);
         memset(response, 0, sizeof(response));
         printf("bytes = %d\n", bytes);
     } while (bytes > 0);
@@ -331,5 +563,25 @@ int main(int argc, const char **argv)
     shutdown(sockfd, 2); // 0 = stop recv; 1 = stop send; 2 = stop both
     close(sockfd);
 
-    return 0;
+}
+
+
+int main(int argc, const char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    Context ctx;
+    context_init(&ctx);
+
+    Task task;
+    task_init(&ctx, &task, 64 * 1024);
+    task_run(&ctx, &task, download, NULL);
+    task_await(&ctx, &task);
+
+    //download(&ctx, NULL);
+    task_deinit(&ctx, &task);
+    context_deinit(&ctx);
+
+    return EXIT_SUCCESS;
 }

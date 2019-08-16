@@ -35,9 +35,9 @@
 #include <unistd.h>
 
 typedef enum {
-    IO_NONE = 0,
-    IO_READ,
-    IO_WRITE
+    IO_None = 0,
+    IO_Read,
+    IO_Write
 } IOType;
 
 typedef struct Global Global;
@@ -55,8 +55,8 @@ typedef struct EventQueue {
 } EventQueue;
 
 typedef enum {
-    EVENT_NONE = 0,
-    EVENT_IO,
+    Event_None = 0,
+    Event_IO,
 } EventType;
 
 typedef struct EventIO {
@@ -72,15 +72,15 @@ typedef struct Event {
     void *udata;
 } Event;
 
-void eventqueue_init(EventQueue *queue);
-void eventqueue_deinit(EventQueue *queue);
-bool eventqueue_dequeue(EventQueue *queue, void **udata);
-void eventqueue_enqueue_io(EventQueue *queue, const EventIO *item, void *udata);
+void EventQueue_Setup(EventQueue *queue);
+void EventQueue_Teardown(EventQueue *queue);
+bool EventQueue_Dequeue(EventQueue *queue, void **udata);
+void EventQueue_EnqueueIO(EventQueue *queue, const EventIO *item, void *udata);
 
 
 #if defined(USE_KQUEUE)
 
-void eventqueue_init(EventQueue *queue)
+void EventQueue_Setup(EventQueue *queue)
 {
     queue->handle = kqueue();
     if (queue->handle == -1) {
@@ -90,13 +90,13 @@ void eventqueue_init(EventQueue *queue)
 }
 
 
-void eventqueue_deinit(EventQueue *queue)
+void EventQueue_Teardown(EventQueue *queue)
 {
     close(queue->handle);
 }
 
 
-bool eventqueue_dequeue(EventQueue *queue, void **udata)
+bool EventQueue_Dequeue(EventQueue *queue, void **udata)
 {
     if (!queue->count) {
         *udata = NULL;
@@ -117,19 +117,19 @@ bool eventqueue_dequeue(EventQueue *queue, void **udata)
 }
 
 
-void eventqueue_enqueue_io(EventQueue *queue, const EventIO *item, void *udata)
+void EventQueue_EnqueueIO(EventQueue *queue, const EventIO *item, void *udata)
 {
     int fd = item->fd;
     IOType type = item->type;
     int filter, ret;
 
     switch (type) {
-    case IO_NONE:
+    case IO_None:
         return;
-    case IO_READ:
+    case IO_Read:
         filter = EVFILT_READ;
         break;
-    case IO_WRITE:
+    case IO_Write:
         filter = EVFILT_WRITE;
         break;
     }
@@ -146,7 +146,7 @@ void eventqueue_enqueue_io(EventQueue *queue, const EventIO *item, void *udata)
 
 #elif defined(USE_EPOLL)
 
-void eventqueue_init(EventQueue *queue)
+void EventQueue_Setup(EventQueue *queue)
 {
     queue->handle = epoll_create(1);
     if (queue->handle == -1) {
@@ -156,13 +156,13 @@ void eventqueue_init(EventQueue *queue)
 }
 
 
-void eventqueue_deinit(EventQueue *queue)
+void EventQueue_Teardown(EventQueue *queue)
 {
     close(queue->handle);
 }
 
 
-bool eventqueue_dequeue(EventQueue *queue, void **udata)
+bool EventQueue_Dequeue(EventQueue *queue, void **udata)
 {
     if (!queue->count) {
         *udata = NULL;
@@ -182,19 +182,19 @@ bool eventqueue_dequeue(EventQueue *queue, void **udata)
 }
 
 
-void eventqueue_enqueue_io(EventQueue *queue, const EventIO *item, void *udata)
+void EventQueue_EnqueueIO(EventQueue *queue, const EventIO *item, void *udata)
 {
     int fd = item->fd;
     IOType type = item->type;
     uint32_t events;
 
     switch (type) {
-    case IO_NONE:
+    case IO_None:
         return;
-    case IO_READ:
+    case IO_Read:
         events = EPOLLIN;
         break;
-    case IO_WRITE:
+    case IO_Write:
         events = EPOLLOUT;
         break;
     }
@@ -225,13 +225,13 @@ void eventqueue_enqueue_io(EventQueue *queue, const EventIO *item, void *udata)
 #endif
 
 
-void eventqueue_enqueue(EventQueue *queue, const Event *item)
+void EventQueue_Enqueue(EventQueue *queue, const Event *item)
 {
     switch (item->type) {
-    case EVENT_NONE:
+    case Event_None:
         break;
-    case EVENT_IO:
-        eventqueue_enqueue_io(queue, &item->value.io, item->udata);
+    case Event_IO:
+        EventQueue_EnqueueIO(queue, &item->value.io, item->udata);
         break;
     }
 }
@@ -250,7 +250,7 @@ struct Context {
 };
 
 
-void contextqueue_enqueue(Context *ctx, ContextQueue *queue, Context *item)
+void ContextQueue_Enqueue(Context *ctx, ContextQueue *queue, Context *item)
 {
     (void)ctx;
 
@@ -272,7 +272,7 @@ void contextqueue_enqueue(Context *ctx, ContextQueue *queue, Context *item)
 }
 
 
-void contextqueue_steal(Context *ctx, ContextQueue *queue, ContextQueue *other)
+void ContextQueue_Steal(Context *ctx, ContextQueue *queue, ContextQueue *other)
 {
     (void)ctx;
 
@@ -290,7 +290,7 @@ void contextqueue_steal(Context *ctx, ContextQueue *queue, ContextQueue *other)
 }
 
 
-Context *contextqueue_dequeue(Context *ctx, ContextQueue *queue)
+Context *ContextQueue_Dequeue(Context *ctx, ContextQueue *queue)
 {
     (void)ctx;
 
@@ -319,50 +319,50 @@ Context *contextqueue_dequeue(Context *ctx, ContextQueue *queue)
 }
 
 
-void global_init(Global *global)
+void Global_Setup(Global *global)
 {
     memset(global, 0, sizeof(*global));
-    eventqueue_init(&global->event_queue);
+    EventQueue_Setup(&global->event_queue);
 }
 
 
-void global_deinit(Global *global)
+void Global_Teardown(Global *global)
 {
-    eventqueue_deinit(&global->event_queue);
+    EventQueue_Teardown(&global->event_queue);
 }
 
 
-void context_init(Context *ctx)
+void Context_Setup(Context *ctx)
 {
     memset(ctx, 0, sizeof(*ctx));
     ctx->global = malloc(sizeof(*ctx->global));
     if (!ctx->global) {
         abort();
     }
-    global_init(ctx->global);
+    Global_Setup(ctx->global);
 }
 
 
-void context_deinit(Context *ctx)
+void Context_Teardown(Context *ctx)
 {
-    global_deinit(ctx->global);
+    Global_Teardown(ctx->global);
     free(ctx->global);
 }
 
 
-void context_enqueue(Context *ctx, Context *item)
+void Context_Enqueue(Context *ctx, Context *item)
 {
-    contextqueue_enqueue(ctx, &ctx->global->context_queue, item);
+    ContextQueue_Enqueue(ctx, &ctx->global->context_queue, item);
 }
 
 
-Context *context_dequeue(Context *ctx)
+Context *Context_Dequeue(Context *ctx)
 {
-    Context *item = contextqueue_dequeue(ctx, &ctx->global->context_queue);
+    Context *item = ContextQueue_Dequeue(ctx, &ctx->global->context_queue);
 
     if (!item) {
         void *udata;
-        if (!eventqueue_dequeue(&ctx->global->event_queue, &udata)) {
+        if (!EventQueue_Dequeue(&ctx->global->event_queue, &udata)) {
             return NULL;
         }
         item = udata;
@@ -372,10 +372,10 @@ Context *context_dequeue(Context *ctx)
 }
 
 
-void context_yield(Context *ctx)
+void Context_Yield(Context *ctx)
 {
     fprintf(stderr, "> context_yield(%p)\n", ctx);
-    Context *item = context_dequeue(ctx);
+    Context *item = Context_Dequeue(ctx);
 
     if (!item) {
         fprintf(stderr, "deadlock\n");
@@ -400,7 +400,7 @@ typedef struct Task {
 } Task;
 
 
-void task_init(Context *ctx, Task *task, size_t stack_size)
+void Task_Setup(Context *ctx, Task *task, size_t stack_size)
 {
     memset(task, 0, sizeof(*task));
 
@@ -421,7 +421,7 @@ void task_init(Context *ctx, Task *task, size_t stack_size)
 }
 
 
-void task_deinit(Context *ctx, Task *task)
+void Task_Teardown(Context *ctx, Task *task)
 {
     (void)ctx;
     free(task->stack);
@@ -439,12 +439,12 @@ static void taskstart(uint32_t y, uint32_t x)
     task->running = true;
     task->action(ctx, task->state);
     task->running = false;
-    contextqueue_steal(ctx, &ctx->global->context_queue, &task->waiting);
-    context_yield(ctx);
+    ContextQueue_Steal(ctx, &ctx->global->context_queue, &task->waiting);
+    Context_Yield(ctx);
 }
 
 
-void task_run(Context *ctx, Task *task,
+void Task_Run(Context *ctx, Task *task,
               void (*action)(Context *ctx, void *state), void *state)
 {
     assert(!task->running);
@@ -457,22 +457,22 @@ void task_run(Context *ctx, Task *task,
 	uint32_t x = z >> 32;
     
     makecontext(&task->context.uc, (void (*)(void))taskstart, 2, y, x);
-    context_enqueue(ctx, &task->context);
+    Context_Enqueue(ctx, &task->context);
 }
 
 
-void task_await(Context *ctx, Task *task)
+void Task_Await(Context *ctx, Task *task)
 {
-    contextqueue_enqueue(ctx, &task->waiting, ctx);
-    context_yield(ctx);
+    ContextQueue_Enqueue(ctx, &task->waiting, ctx);
+    Context_Yield(ctx);
 }
 
 
-void unblock_io(Context *ctx, int fd, IOType type)
+void Context_UnblockIO(Context *ctx, int fd, IOType type)
 {
     EventIO event = { .fd = fd, .type = type };
-    eventqueue_enqueue_io(&ctx->global->event_queue, &event, ctx);
-    context_yield(ctx);
+    EventQueue_EnqueueIO(&ctx->global->event_queue, &event, ctx);
+    Context_Yield(ctx);
 }
 
 
@@ -515,7 +515,7 @@ void download(Context *ctx, void *state)
             continue;
         }
 
-        unblock_io(ctx, sockfd, IO_WRITE);
+        Context_UnblockIO(ctx, sockfd, IO_Write);
 
         printf("success!\n");
         break; // success
@@ -528,7 +528,7 @@ void download(Context *ctx, void *state)
     while (buf_len > 0) {
         while ((nsend = send(sockfd, buf, buf_len, 0)) < 0
                     && errno == EAGAIN) {
-            unblock_io(ctx, sockfd, IO_WRITE);
+            Context_UnblockIO(ctx, sockfd, IO_Write);
         }
         if (nsend < 0) {
             printf("ERROR writing to socket\n");
@@ -548,7 +548,7 @@ void download(Context *ctx, void *state)
     do {
         while ((bytes = recv(sockfd, response, total, 0)) < 0
                     && errno == EAGAIN) {
-            unblock_io(ctx, sockfd, IO_READ);
+            Context_UnblockIO(ctx, sockfd, IO_Read);
         }
         if (bytes < 0) {
             printf("ERROR reading response from socket\n");
@@ -572,16 +572,15 @@ int main(int argc, const char **argv)
     (void)argv;
 
     Context ctx;
-    context_init(&ctx);
+    Context_Setup(&ctx);
 
     Task task;
-    task_init(&ctx, &task, 64 * 1024);
-    task_run(&ctx, &task, download, NULL);
-    task_await(&ctx, &task);
+    Task_Setup(&ctx, &task, 64 * 1024);
+    Task_Run(&ctx, &task, download, NULL);
+    Task_Await(&ctx, &task);
 
-    //download(&ctx, NULL);
-    task_deinit(&ctx, &task);
-    context_deinit(&ctx);
+    Task_Teardown(&ctx, &task);
+    Context_Teardown(&ctx);
 
     return EXIT_SUCCESS;
 }

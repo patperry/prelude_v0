@@ -272,12 +272,40 @@ struct Global {
     ContextQueue context_queue;
 };
 
+typedef struct Defer {
+    void (*action)(Context *ctx, void *arg);
+    void *arg;
+} Defer;
+
+typedef struct DeferStack {
+    Defer *items;
+    int count;
+    int capacity;
+} DeferStack;
+
 struct Context {
     ucontext_t uc;
     Global *global;
     Context *next;
     Context *prev;
+    DeferStack deferred;
+    Error panic;
 };
+
+void DeferStack_Push(Context *ctx, DeferStack *stack, const Defer *item)
+{
+    // TODO
+}
+
+bool DeferStack_Pop(Context *ctx, DeferStack *stack, Defer *item)
+{
+    if (!stack->count) {
+        return false;
+    }
+    stack->count--;
+    *item = stack->items[stack->count];
+    return true;
+}
 
 
 void ContextQueue_Enqueue(Context *ctx, ContextQueue *queue, Context *item)
@@ -372,9 +400,11 @@ void Context_Setup(Context *ctx)
     Global_Setup(ctx->global);
 }
 
+void Context_Close(Context *ctx, int frame);
 
 void Context_Teardown(Context *ctx)
 {
+    Context_Close(ctx, 0);
     Global_Teardown(ctx->global);
     free(ctx->global);
 }
@@ -419,12 +449,62 @@ void Context_Yield(Context *ctx)
 }
 
 
+int Context_Open(Context *ctx)
+{
+    return ctx->deferred.count;
+}
+
+
+void Context_Close(Context *ctx, int frame)
+{
+    assert(ctx->deferred.count >= frame);
+    while (ctx->deferred.count != frame) {
+        Defer defer;
+        DeferStack_Pop(ctx, &ctx->deferred, &defer);
+        defer.action(ctx, defer.arg);
+    }
+}
+
+
+Error Context_Recover(Context *ctx)
+{
+    Error panic = ctx->panic;
+    if (panic) {
+        ctx->panic = Error_None;
+    }
+    return panic;
+}
+
+
+void Context_Panic(Context *ctx, const char *fmt, ...)
+{
+    Context_Close(ctx, 0);
+    if (ctx->panic) { // not recovered
+        fprintf(stderr, "panic: %s\n", ctx->panic);
+        abort();
+    } else {
+        // TODO: exit if no other coroutines?
+        Context_Yield(ctx);
+    }
+}
+
+
+void Context_Defer(Context *ctx, void (*action)(Context *ctx, void *arg),
+                   void *arg)
+{
+    Defer defer = {.action = action, .arg = arg};
+    DeferStack_Push(ctx, &ctx->deferred, &defer);
+}
+
+
+
 typedef struct Task {
     Context context;
     void *stack;
     size_t stack_size;
-    void (*action)(Context *ctx, void *state);
+    void (*action)(Context *ctx, void *state, Error *err);
     void *state;
+    Error err;
     bool running;
     ContextQueue waiting;
 } Task;
@@ -451,9 +531,10 @@ void Task_Setup(Context *ctx, Task *task, size_t stack_size)
 }
 
 
-void Task_Teardown(Context *ctx, Task *task)
+void Task_Teardown(Context *ctx, void *arg)
 {
     (void)ctx;
+    Task *task = arg;
     free(task->stack);
 }
 
@@ -467,7 +548,7 @@ static void taskstart(uint32_t y, uint32_t x)
     Context *ctx = &task->context;
 
     task->running = true;
-    task->action(ctx, task->state);
+    task->action(ctx, task->state, &task->err);
     task->running = false;
     ContextQueue_Steal(ctx, &ctx->global->context_queue, &task->waiting);
     Context_Yield(ctx);
@@ -475,12 +556,14 @@ static void taskstart(uint32_t y, uint32_t x)
 
 
 void Task_Run(Context *ctx, Task *task,
-              void (*action)(Context *ctx, void *state), void *state)
+              void (*action)(Context *ctx, void *state, Error *err),
+              void *state)
 {
     assert(!task->running);
 
     task->action = action;
     task->state = state;
+    task->err = Error_None;
 
 	uint64_t z = (uint64_t)task;
 	uint32_t y = (uint32_t)z;
@@ -491,10 +574,11 @@ void Task_Run(Context *ctx, Task *task,
 }
 
 
-void Task_Await(Context *ctx, Task *task)
+void Task_Await(Context *ctx, Task *task, Error *err)
 {
     ContextQueue_Enqueue(ctx, &task->waiting, ctx);
     Context_Yield(ctx);
+    *err = task->err;
 }
 
 
@@ -526,23 +610,21 @@ void Socket_Setup(Context *ctx, Socket *sock, int domain, int type,
     }
 }
 
-void Socket_Teardown(Context *ctx, Socket *sock)
+
+void Socket_Teardown(Context *ctx, void *arg)
 {
+    Socket *sock = arg;
     if (sock->handle) {
         close(sock->handle);
     }
 }
 
-typedef struct Download {
-    Error err;
-} Download;
 
-void download(Context *ctx, void *state)
+void download(Context *ctx, void *state, Error *err)
 {
-    Download *dl = state;
-    Error *err = &dl->err;
-    *err = Error_None;
+    int frame = Context_Open(ctx);
 
+    (void)state;
     const char *hostname = "www.unicode.org";
     // http://www.unicode.org/Public/12.0.0/data/ucd/UnicodeData.txt
     const char *message = 
@@ -560,7 +642,7 @@ void download(Context *ctx, void *state)
     if ((ret = getaddrinfo(hostname, "http", &hints, &res0))) {
         Error_Setup(ctx, err, "failed getting host address: %s",
                     gai_strerror(ret));
-        return;
+        goto Exit;
     }
 
     assert(res0);
@@ -590,14 +672,15 @@ void download(Context *ctx, void *state)
             continue;
         }
 
-        Context_UnblockIO(ctx, sock.handle, IO_Write);
+        Context_Defer(ctx, Socket_Teardown, &sock);
+        Context_UnblockIO(ctx, sock.handle, IO_Write); // TODO: this could fail
         has_sock = true;
         break; // success
     }
 
     if (!has_sock) {
         assert(*err);
-        return;
+        goto Exit;
     }
 
     const char *buf = message;
@@ -611,7 +694,7 @@ void download(Context *ctx, void *state)
         }
         if (nsend < 0) {
             printf("ERROR writing to socket\n");
-            return;
+            goto Exit;
         } else if (nsend == 0) {
             printf("partial write");
         } else {
@@ -631,7 +714,7 @@ void download(Context *ctx, void *state)
         }
         if (bytes < 0) {
             printf("ERROR reading response from socket\n");
-            return;
+            goto Exit;
         }
         //printf("%s", response);
         memset(response, 0, sizeof(response));
@@ -640,8 +723,8 @@ void download(Context *ctx, void *state)
 
     freeaddrinfo(res0);
     shutdown(sock.handle, 2); // 0 = stop recv; 1 = stop send; 2 = stop both
-    Socket_Teardown(ctx, &sock);
-
+Exit:
+    Context_Close(ctx, frame);
 }
 
 
@@ -650,20 +733,23 @@ int main(int argc, const char **argv)
     (void)argc;
     (void)argv;
 
+    Error err = Error_None;
+
     Context ctx;
-    Download dl;
     Context_Setup(&ctx);
 
     Task task;
     Task_Setup(&ctx, &task, 64 * 1024);
-    Task_Run(&ctx, &task, download, &dl);
-    Task_Await(&ctx, &task);
+    Context_Defer(&ctx, Task_Teardown, &task);
 
-    if (dl.err) {
-        printf("Error: %s\n", dl.err);
+    Task_Run(&ctx, &task, download, NULL);
+    Task_Await(&ctx, &task, &err);
+
+    if (err) {
+        printf("error: %s\n", err);
+        Error_Teardown(&ctx, &err);
     }
 
-    Task_Teardown(&ctx, &task);
     Context_Teardown(&ctx);
 
     return EXIT_SUCCESS;

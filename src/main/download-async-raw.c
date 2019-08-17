@@ -34,15 +34,42 @@
 #include <netdb.h>
 #include <unistd.h>
 
+typedef struct Global Global;
+typedef struct Context Context;
+typedef struct ContextQueue ContextQueue;
+
+typedef char *Error;
+#define Error_None NULL
+
+void Error_Setup(Context *ctx, Error *err, const char *fmt, ...)
+{
+    // TODO
+    (void)ctx;
+    (void)err;
+    (void)fmt;
+}
+
+void Error_Teardown(Context *ctx, Error *err)
+{
+    // TODO
+    (void)ctx;
+    (void)err;
+}
+
+const char *Error_String(Context *ctx, Error *err)
+{
+    // TODO
+    (void)ctx;
+    return NULL;
+}
+
+
 typedef enum {
     IO_None = 0,
     IO_Read,
     IO_Write
 } IOType;
 
-typedef struct Global Global;
-typedef struct Context Context;
-typedef struct ContextQueue ContextQueue;
 
 struct ContextQueue {
     Context *head;
@@ -120,8 +147,7 @@ bool BlockQueue_Dequeue(BlockQueue *queue, void **data)
 }
 
 
-void BlockQueue_EnqueueIO(BlockQueue *queue, const BlockIO *item,
-                            void *data)
+void BlockQueue_EnqueueIO(BlockQueue *queue, const BlockIO *item, void *data)
 {
     int fd = item->fd;
     IOType type = item->type;
@@ -479,12 +505,44 @@ void Context_UnblockIO(Context *ctx, int fd, IOType type)
     Context_Yield(ctx);
 }
 
+typedef struct Socket {
+    int handle;
+} Socket;
+
+void Socket_Setup(Context *ctx, Socket *sock, int domain, int type,
+                  int protocol, Error *err)
+{
+    memset(sock, 0, sizeof(*sock));
+    *err = Error_None;
+
+    int fd = socket(domain, type, protocol);
+    if (fd < 0) {
+        Error_Setup(ctx, err, "failed allocating socket: %s",
+                    strerror(errno));
+    } else {
+        assert(fd != 0);
+        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+        sock->handle = fd;
+    }
+}
+
+void Socket_Teardown(Context *ctx, Socket *sock)
+{
+    if (sock->handle) {
+        close(sock->handle);
+    }
+}
+
+typedef struct Download {
+    Error err;
+} Download;
 
 void download(Context *ctx, void *state)
 {
-    (void)state;
+    Download *dl = state;
+    Error *err = &dl->err;
+    *err = Error_None;
 
-    int err = 0;
     const char *hostname = "www.unicode.org";
     // http://www.unicode.org/Public/12.0.0/data/ucd/UnicodeData.txt
     const char *message = 
@@ -494,35 +552,52 @@ void download(Context *ctx, void *state)
 
     struct addrinfo *res, *res0;
     struct addrinfo hints;
+    int ret;
+
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = PF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    if ((err = getaddrinfo(hostname, "http", &hints, &res0))) {
-        printf("ERROR %s\n", gai_strerror(err));
+    if ((ret = getaddrinfo(hostname, "http", &hints, &res0))) {
+        Error_Setup(ctx, err, "failed getting host address: %s",
+                    gai_strerror(ret));
         return;
     }
 
-    int sockfd = -1;
+    assert(res0);
+
+    Socket sock;
+    bool has_sock = false;
+
     for (res = res0; res; res = res->ai_next) {
-        sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-        if (sockfd < 0) {
-            // socket failed
+        Socket_Setup(ctx, &sock, res->ai_family, res->ai_socktype,
+                     res->ai_protocol, err);
+        if (*err) {
+            if (!res->ai_next) {
+                break;
+            }
+            Error_Teardown(ctx, err);
             continue;
         }
-        fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK);
 
-        if (connect(sockfd, res->ai_addr, res->ai_addrlen) < 0
+        if (connect(sock.handle, res->ai_addr, res->ai_addrlen) < 0
                 && errno != EINPROGRESS) {
-            // connect failed
-            close(sockfd);
-            sockfd = -1;
+            Socket_Teardown(ctx, &sock);
+            if (!res->ai_next) {
+                Error_Setup(ctx, err, "failed connecting to host: %s",
+                            strerror(errno));
+                break;
+            }
             continue;
         }
 
-        Context_UnblockIO(ctx, sockfd, IO_Write);
-
-        printf("success!\n");
+        Context_UnblockIO(ctx, sock.handle, IO_Write);
+        has_sock = true;
         break; // success
+    }
+
+    if (!has_sock) {
+        assert(*err);
+        return;
     }
 
     const char *buf = message;
@@ -530,9 +605,9 @@ void download(Context *ctx, void *state)
     int nsend = 0;
 
     while (buf_len > 0) {
-        while ((nsend = send(sockfd, buf, buf_len, 0)) < 0
+        while ((nsend = send(sock.handle, buf, buf_len, 0)) < 0
                     && errno == EAGAIN) {
-            Context_UnblockIO(ctx, sockfd, IO_Write);
+            Context_UnblockIO(ctx, sock.handle, IO_Write);
         }
         if (nsend < 0) {
             printf("ERROR writing to socket\n");
@@ -550,9 +625,9 @@ void download(Context *ctx, void *state)
     int total = sizeof(response)-1;
     int bytes = 0;
     do {
-        while ((bytes = recv(sockfd, response, total, 0)) < 0
+        while ((bytes = recv(sock.handle, response, total, 0)) < 0
                     && errno == EAGAIN) {
-            Context_UnblockIO(ctx, sockfd, IO_Read);
+            Context_UnblockIO(ctx, sock.handle, IO_Read);
         }
         if (bytes < 0) {
             printf("ERROR reading response from socket\n");
@@ -564,8 +639,8 @@ void download(Context *ctx, void *state)
     } while (bytes > 0);
 
     freeaddrinfo(res0);
-    shutdown(sockfd, 2); // 0 = stop recv; 1 = stop send; 2 = stop both
-    close(sockfd);
+    shutdown(sock.handle, 2); // 0 = stop recv; 1 = stop send; 2 = stop both
+    Socket_Teardown(ctx, &sock);
 
 }
 
@@ -576,12 +651,17 @@ int main(int argc, const char **argv)
     (void)argv;
 
     Context ctx;
+    Download dl;
     Context_Setup(&ctx);
 
     Task task;
     Task_Setup(&ctx, &task, 64 * 1024);
-    Task_Run(&ctx, &task, download, NULL);
+    Task_Run(&ctx, &task, download, &dl);
     Task_Await(&ctx, &task);
+
+    if (dl.err) {
+        printf("Error: %s\n", dl.err);
+    }
 
     Task_Teardown(&ctx, &task);
     Context_Teardown(&ctx);

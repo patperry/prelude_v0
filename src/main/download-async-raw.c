@@ -2,7 +2,7 @@
 #define _XOPEN_SOURCE // ucontext
 #include <assert.h>
 #include <errno.h>
-#include <stdbool.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,12 +34,24 @@
 #include <netdb.h>
 #include <unistd.h>
 
+typedef enum {
+    None = -1,
+    False = 0,
+    True = 1
+} Bool;
+
+typedef int Int;
+#define Int_None INT_MIN
+#define Int_Min (INT_MIN + 1)
+#define Int_Max INT_MAX
+
+typedef char *Error;
+#define Error_None NULL
+
 typedef struct Global Global;
 typedef struct Context Context;
 typedef struct ContextQueue ContextQueue;
 
-typedef char *Error;
-#define Error_None NULL
 
 void Error_Setup(Context *ctx, Error *err, const char *fmt, ...)
 {
@@ -49,18 +61,12 @@ void Error_Setup(Context *ctx, Error *err, const char *fmt, ...)
     (void)fmt;
 }
 
+
 void Error_Teardown(Context *ctx, Error *err)
 {
     // TODO
     (void)ctx;
     (void)err;
-}
-
-const char *Error_String(Context *ctx, Error *err)
-{
-    // TODO
-    (void)ctx;
-    return NULL;
 }
 
 
@@ -77,8 +83,8 @@ struct ContextQueue {
 };
 
 typedef struct BlockQueue {
-    int handle;
-    int count;
+    Int fd;
+    Int len;
 } BlockQueue;
 
 typedef enum {
@@ -87,7 +93,7 @@ typedef enum {
 } BlockType;
 
 typedef struct BlockIO {
-    int fd;
+    Int fd;
     IOType type;
 } BlockIO;
 
@@ -103,7 +109,7 @@ typedef struct Block {
 
 void BlockQueue_Setup(BlockQueue *queue);
 void BlockQueue_Teardown(BlockQueue *queue);
-bool BlockQueue_Dequeue(BlockQueue *queue, void **data);
+Bool BlockQueue_Dequeue(BlockQueue *queue, void **data);
 void BlockQueue_EnqueueIO(BlockQueue *queue, const BlockIO *item,
                             void *data);
 
@@ -112,44 +118,44 @@ void BlockQueue_EnqueueIO(BlockQueue *queue, const BlockIO *item,
 
 void BlockQueue_Setup(BlockQueue *queue)
 {
-    queue->handle = kqueue();
-    if (queue->handle == -1) {
+    queue->fd = kqueue();
+    if (queue->fd == -1) {
         abort(); // check errno
     }
-    queue->count = 0;
+    queue->len = 0;
 }
 
 
 void BlockQueue_Teardown(BlockQueue *queue)
 {
-    close(queue->handle);
+    close(queue->fd);
 }
 
 
-bool BlockQueue_Dequeue(BlockQueue *queue, void **data)
+Bool BlockQueue_Dequeue(BlockQueue *queue, void **data)
 {
-    if (!queue->count) {
+    if (!queue->len) {
         *data = NULL;
-        return false;
+        return False;
     }
 
     struct kevent event;
     int ret;
-    ret = kevent(queue->handle, NULL, 0, &event, 1, NULL);
+    ret = kevent(queue->fd, NULL, 0, &event, 1, NULL);
     if (ret == -1) {
         abort(); // failure
     }
     assert(ret == 1);
-    queue->count--;
+    queue->len--;
 
     *data = event.udata;
-    return true;
+    return True;
 }
 
 
 void BlockQueue_EnqueueIO(BlockQueue *queue, const BlockIO *item, void *data)
 {
-    int fd = item->fd;
+    int fd = (int)item->fd;
     IOType type = item->type;
     int filter, ret;
 
@@ -167,54 +173,54 @@ void BlockQueue_EnqueueIO(BlockQueue *queue, const BlockIO *item, void *data)
     struct kevent event;
     EV_SET(&event, fd, filter, EV_ADD | EV_ONESHOT, 0, 0, data);
 
-    ret = kevent(queue->handle, &event, 1, NULL, 0, NULL);
+    ret = kevent(queue->fd, &event, 1, NULL, 0, NULL);
     if (ret == -1) {
         abort(); // failure
     }
-    queue->count++;
+    queue->len++;
 }
 
 #elif defined(USE_EPOLL)
 
 void BlockQueue_Setup(BlockQueue *queue)
 {
-    queue->handle = epoll_create(1);
-    if (queue->handle == -1) {
+    queue->fd = epoll_create(1);
+    if (queue->fd == -1) {
         abort(); // check errno
     }
-    queue->count = 0;
+    queue->len = 0;
 }
 
 
 void BlockQueue_Teardown(BlockQueue *queue)
 {
-    close(queue->handle);
+    close(queue->fd);
 }
 
 
-bool BlockQueue_Dequeue(BlockQueue *queue, void **data)
+Bool BlockQueue_Dequeue(BlockQueue *queue, void **data)
 {
-    if (!queue->count) {
+    if (!queue->len) {
         *data = NULL;
-        return false;
+        return False;
     }
 
     struct epoll_event event;
     int ret;
-    ret = epoll_wait(queue->handle, &event, 1, -1);
+    ret = epoll_wait(queue->fd, &event, 1, -1);
     if (ret == -1) {
         abort(); // failure
     }
     assert(ret == 1);
-    queue->count--;
+    queue->len--;
     *data = event.data.ptr;
-    return true;
+    return True;
 }
 
 
 void BlockQueue_EnqueueIO(BlockQueue *queue, const EventIO *item, void *data)
 {
-    int fd = item->fd;
+    int fd = (int)item->fd;
     IOType type = item->type;
     uint32_t events;
 
@@ -233,7 +239,7 @@ void BlockQueue_EnqueueIO(BlockQueue *queue, const EventIO *item, void *data)
     event.events = events | EPOLLONESHOT;
     event.data.ptr = data;
 
-    int ret = epoll_ctl(queue->handle, EPOLL_CTL_MOD, fd, &event);
+    int ret = epoll_ctl(queue->fd, EPOLL_CTL_MOD, fd, &event);
     // With epoll, ONESHOT disables the fd, not deletes it like kqueue does.
     //
     // The common case is repeated polls on the same file descriptor,
@@ -241,7 +247,7 @@ void BlockQueue_EnqueueIO(BlockQueue *queue, const EventIO *item, void *data)
     // whether we have added the descriptor already ourselves...
 
     if (ret == -1 && errno == ENOENT) {
-        ret = epoll_ctl(queue->handle, EPOLL_CTL_ADD, fd, &event);
+        ret = epoll_ctl(queue->fd, EPOLL_CTL_ADD, fd, &event);
         // ...If MOD fails, try ADD.
     }
 
@@ -249,7 +255,7 @@ void BlockQueue_EnqueueIO(BlockQueue *queue, const EventIO *item, void *data)
         abort(); // failure
     }
 
-    queue->count++;
+    queue->len++;
 }
 
 #endif
@@ -279,8 +285,8 @@ typedef struct Defer {
 
 typedef struct DeferStack {
     Defer *items;
-    int count;
-    int capacity;
+    Int len;
+    Int cap;
 } DeferStack;
 
 struct Context {
@@ -297,14 +303,14 @@ void DeferStack_Push(Context *ctx, DeferStack *stack, const Defer *item)
     // TODO
 }
 
-bool DeferStack_Pop(Context *ctx, DeferStack *stack, Defer *item)
+Bool DeferStack_Pop(Context *ctx, DeferStack *stack, Defer *item)
 {
-    if (!stack->count) {
-        return false;
+    if (!stack->len) {
+        return False;
     }
-    stack->count--;
-    *item = stack->items[stack->count];
-    return true;
+    stack->len--;
+    *item = stack->items[stack->len];
+    return True;
 }
 
 
@@ -379,7 +385,7 @@ Context *ContextQueue_Dequeue(Context *ctx, ContextQueue *queue)
 
 void Global_Setup(Global *global)
 {
-    memset(global, 0, sizeof(*global));
+    *global = (Global){0};
     BlockQueue_Setup(&global->event_queue);
 }
 
@@ -392,7 +398,7 @@ void Global_Teardown(Global *global)
 
 void Context_Setup(Context *ctx)
 {
-    memset(ctx, 0, sizeof(*ctx));
+    *ctx = (Context){0};
     ctx->global = malloc(sizeof(*ctx->global));
     if (!ctx->global) {
         abort();
@@ -449,16 +455,16 @@ void Context_Yield(Context *ctx)
 }
 
 
-int Context_Open(Context *ctx)
+Int Context_Open(Context *ctx)
 {
-    return ctx->deferred.count;
+    return ctx->deferred.len;
 }
 
 
-void Context_Close(Context *ctx, int frame)
+void Context_Close(Context *ctx, Int frame)
 {
-    assert(ctx->deferred.count >= frame);
-    while (ctx->deferred.count != frame) {
+    assert(ctx->deferred.len >= frame);
+    while (ctx->deferred.len != frame) {
         Defer defer;
         DeferStack_Pop(ctx, &ctx->deferred, &defer);
         defer.action(ctx, defer.arg);
@@ -505,15 +511,14 @@ typedef struct Task {
     void (*action)(Context *ctx, void *state, Error *err);
     void *state;
     Error err;
-    bool running;
+    Bool running;
     ContextQueue waiting;
 } Task;
 
 
 void Task_Setup(Context *ctx, Task *task, size_t stack_size)
 {
-    memset(task, 0, sizeof(*task));
-
+    *task = (Task){0};
     task->context = *ctx;
 
     if (getcontext(&task->context.uc) < 0) {
@@ -547,9 +552,9 @@ static void taskstart(uint32_t y, uint32_t x)
     Task *task = (Task *)z;
     Context *ctx = &task->context;
 
-    task->running = true;
+    task->running = True;
     task->action(ctx, task->state, &task->err);
-    task->running = false;
+    task->running = False;
     ContextQueue_Steal(ctx, &ctx->global->context_queue, &task->waiting);
     Context_Yield(ctx);
 }
@@ -582,7 +587,7 @@ void Task_Await(Context *ctx, Task *task, Error *err)
 }
 
 
-void Context_UnblockIO(Context *ctx, int fd, IOType type)
+void Context_UnblockIO(Context *ctx, Int fd, IOType type)
 {
     BlockIO event = { .fd = fd, .type = type };
     BlockQueue_EnqueueIO(&ctx->global->event_queue, &event, ctx);
@@ -590,23 +595,25 @@ void Context_UnblockIO(Context *ctx, int fd, IOType type)
 }
 
 typedef struct Socket {
-    int handle;
+    Int fd;
 } Socket;
 
 void Socket_Setup(Context *ctx, Socket *sock, int domain, int type,
                   int protocol, Error *err)
 {
-    memset(sock, 0, sizeof(*sock));
+    *sock = (Socket){0};
     *err = Error_None;
 
     int fd = socket(domain, type, protocol);
     if (fd < 0) {
         Error_Setup(ctx, err, "failed allocating socket: %s",
                     strerror(errno));
+    } else if (fd > Int_Max) {
+        Context_Panic(ctx, "file descriptor exceeds maximum (%d)", Int_Max);
     } else {
         assert(fd != 0);
         fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
-        sock->handle = fd;
+        sock->fd = fd;
     }
 }
 
@@ -614,17 +621,16 @@ void Socket_Setup(Context *ctx, Socket *sock, int domain, int type,
 void Socket_Teardown(Context *ctx, void *arg)
 {
     Socket *sock = arg;
-    if (sock->handle) {
-        close(sock->handle);
+    if (sock->fd) {
+        close(sock->fd);
     }
 }
 
 
 void download(Context *ctx, void *state, Error *err)
 {
-    int frame = Context_Open(ctx);
+    Int frame = Context_Open(ctx);
 
-    (void)state;
     const char *hostname = "www.unicode.org";
     // http://www.unicode.org/Public/12.0.0/data/ucd/UnicodeData.txt
     const char *message = 
@@ -633,10 +639,9 @@ void download(Context *ctx, void *state, Error *err)
         "\r\n";
 
     struct addrinfo *res, *res0;
-    struct addrinfo hints;
+    struct addrinfo hints = {0};
     int ret;
 
-    memset(&hints, 0, sizeof(hints));
     hints.ai_family = PF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     if ((ret = getaddrinfo(hostname, "http", &hints, &res0))) {
@@ -648,7 +653,7 @@ void download(Context *ctx, void *state, Error *err)
     assert(res0);
 
     Socket sock;
-    bool has_sock = false;
+    Bool has_sock = False;
 
     for (res = res0; res; res = res->ai_next) {
         Socket_Setup(ctx, &sock, res->ai_family, res->ai_socktype,
@@ -661,7 +666,7 @@ void download(Context *ctx, void *state, Error *err)
             continue;
         }
 
-        if (connect(sock.handle, res->ai_addr, res->ai_addrlen) < 0
+        if (connect(sock.fd, res->ai_addr, res->ai_addrlen) < 0
                 && errno != EINPROGRESS) {
             Socket_Teardown(ctx, &sock);
             if (!res->ai_next) {
@@ -673,8 +678,8 @@ void download(Context *ctx, void *state, Error *err)
         }
 
         Context_Defer(ctx, Socket_Teardown, &sock);
-        Context_UnblockIO(ctx, sock.handle, IO_Write); // TODO: this could fail
-        has_sock = true;
+        Context_UnblockIO(ctx, sock.fd, IO_Write); // TODO: this could fail
+        has_sock = True;
         break; // success
     }
 
@@ -684,13 +689,13 @@ void download(Context *ctx, void *state, Error *err)
     }
 
     const char *buf = message;
-    int buf_len = (int)strlen(message);
-    int nsend = 0;
+    Int buf_len = (Int)strlen(message);
+    Int nsend = 0;
 
     while (buf_len > 0) {
-        while ((nsend = send(sock.handle, buf, buf_len, 0)) < 0
+        while ((nsend = send(sock.fd, buf, buf_len, 0)) < 0
                     && errno == EAGAIN) {
-            Context_UnblockIO(ctx, sock.handle, IO_Write);
+            Context_UnblockIO(ctx, sock.fd, IO_Write);
         }
         if (nsend < 0) {
             printf("ERROR writing to socket\n");
@@ -703,14 +708,13 @@ void download(Context *ctx, void *state, Error *err)
         }
     }
 
-    char response[4096];
-    memset(response, 0, sizeof(response));
-    int total = sizeof(response)-1;
-    int bytes = 0;
+    char response[4096] = {0};
+    Int total = sizeof(response)-1;
+    Int bytes = 0;
     do {
-        while ((bytes = recv(sock.handle, response, total, 0)) < 0
+        while ((bytes = recv(sock.fd, response, total, 0)) < 0
                     && errno == EAGAIN) {
-            Context_UnblockIO(ctx, sock.handle, IO_Read);
+            Context_UnblockIO(ctx, sock.fd, IO_Read);
         }
         if (bytes < 0) {
             printf("ERROR reading response from socket\n");
@@ -722,7 +726,7 @@ void download(Context *ctx, void *state, Error *err)
     } while (bytes > 0);
 
     freeaddrinfo(res0);
-    shutdown(sock.handle, 2); // 0 = stop recv; 1 = stop send; 2 = stop both
+    shutdown(sock.fd, 2); // 0 = stop recv; 1 = stop send; 2 = stop both
 Exit:
     Context_Close(ctx, frame);
 }
